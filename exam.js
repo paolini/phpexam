@@ -37,6 +37,15 @@ function load(action) {
     });
 }
 
+function timestamp_to_string(d) {
+    function digits(n) {
+        if (n<10) return "0" + n.toString();
+        return n.toString();
+    }
+    return d.getDate() + "." + (d.getMonth()+1) + "." + d.getFullYear() 
+        + " " + d.getHours() + ":" + digits(d.getMinutes()) + ":" + digits(d.getSeconds());
+}
+
 function submit(data) {
     var post = {};
     post.user = $("#user").val();
@@ -59,7 +68,11 @@ function submit(data) {
             $("#auth").show();
         }
         if (data.message) {
-            $("#response").text(data.message);
+            msg = data.message;
+            if (data.timestamp) {
+                msg = timestamp_to_string(new Date(data.timestamp)) + ": " + msg;
+            }
+            $("#response").text(msg);
         }
         if (data.ok == true) {
             $("#response").css("color", "blue");
@@ -83,6 +96,7 @@ function main(data) {
     $("#text").show();
     var $exercises = $("#exercises");
     $exercises.empty();
+    $exercises.append("<br>\n");
     data.text.exercises.forEach(function(exercise, i) {
         $exercises.append("<b>Esercizio " + (exercise.number) + ":</b> " + exercise.statement + "<br />");
         exercise.questions.forEach(function(question) {

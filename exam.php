@@ -212,7 +212,8 @@ class ExamError extends Exception {
 
 
 class Exam {
-    function __construct($xml_filename) {
+    function __construct($xml_filename, $exam_id) {
+        $this->exam_id = $exam_id;
         libxml_use_internal_errors(true);
         $this->xml_root = simplexml_load_file($xml_filename);
         if (!$this->xml_root) {
@@ -224,31 +225,26 @@ class Exam {
             throw new Exception($message);
         }
     
-        $this->secret = '';
-        $this->admins = [];
-        foreach($this->xml_root->attributes() as $key => $val) {
-            $val = (string) $val;
-            if ($key === 'secret') $this->secret = $val;
-            else if ($key === 'admins') {
-                $this->admins = explode(',', $val);
-            } else if ($key === 'storage_path') {
-                $this->storage_path = $val;
-            } else if ($key === 'course') {
-                $this->course = $val;
-            } else if ($key === 'name') {
-                $this->name = $val;
-            } else if ($key === 'date') {
-                $this->date = $val;
-            }
+        $this->secret = array_get($this->xml_root, 'secret', '');
+        $this->admins = array_filter(explode(',', array_get($this->xml_root, 'admins', '')), function($x) {return $x !== '';});
+        $this->storage_path = array_get($this->xml_root, 'storage_path', $this->exam_id);
+        if (substr($this->storage_path, 0, 1) !== '/') {
+            // relative path
+            $this->storage_path = __DIR__ . '/' . $this->storage_path;
         }
+        $this->course = array_get($this->xml_root, 'course');
+        $this->name = array_get($this->xml_root, 'name');
+        $this->date = array_get($this->xml_root, 'date');
     }
 
     function login($user) {
         $this->is_admin = in_array($user['matricola'], $this->admins);
         $this->matricola = $user['matricola'];    
+        $this->logged_in = true;
     }
     
     function compose($options) {
+        if (!isset($this->logged_in)) throw new Exception('Call Exam::login before Exam::compose');
         $this->options = $options;
         $matricola = $this->matricola;
         if ($this->is_admin) { // admin può chiedere il compito di altri
@@ -348,12 +344,14 @@ class Exam {
         $filename = $this->storage_path . "/" . $user['matricola'] . ".jsons";
         # error_log("writing to file " . $filename);
         $fp = fopen($filename, "at") or die("Cannot write file!");
+        $timestamp = date(DATE_ATOM);
         fwrite($fp, json_encode([
-            'timestamp' => date(DATE_ATOM),
+            'timestamp' => $timestamp,
             'user' => $user,
             $action => $object
             ]) . "\n");
         fclose($fp);
+        return $timestamp;
     } 
     
 }
@@ -385,6 +383,7 @@ function get_compito($exam, $user, $options) {
 }
 
 function submit($exam, $user) {
+    $exam->login($user);
     $exam->compose($user, []);
     $response = [];
     $response['user'] = $user;
@@ -401,11 +400,11 @@ function submit($exam, $user) {
             $response['message'] = 'richiesta non valida';
             return $response;
         }
-        $risposta['answer'] = $_POST[$key];
+        $answer['answer'] = $_POST[$key];
     }
     // error_log("risposte: " . json_encode($compito->risposte));
     
-    $exam->write($user, "submit", $exam->answers);
+    $response['timestamp'] = $exam->write($user, "submit", $exam->answers);
     $response['ok'] = True;
     $response['message'] = "risposte inviate!";
     return $response;
@@ -451,15 +450,17 @@ if (!preg_match('/^[A-Za-z0-9\-]+$/', $exam_id)) {
     exit();
 }
 
-$exam_filename = $exam_id . '.xml';
+$exam_filename = __DIR__ . '/' . $exam_id . '.xml';
 if (!file_exists($exam_filename)) {
+    error_log("Cannot open file $exam_filename\n");
     header('HTTP/1.1 404 Not Found');
     echo("esame non trovato");
+    echo(__FILE__ . " " . __DIR__);
     exit();
 }
 
 try {
-    $exam = new Exam($exam_filename);
+    $exam = new Exam($exam_filename, $exam_id);
 } catch (Exception $e) {
     header('HTTP/1.1 500 Internal Error');
     echo("<html><body><pre>{$e->getMessage()}</pre></html></body>");
@@ -482,7 +483,7 @@ echo json_encode(serve($exam));
     <script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML"></script>
     <script src="https://code.jquery.com/jquery-3.5.0.min.js" integrity="sha256-xNzN2a4ltkB44Mc/Jz3pT4iU1cmeR0FkXs4pru/JxaQ=" crossorigin="anonymous"></script>
     <script>
-        <?php echo file_get_contents('exam.js')?> 
+        <?php echo file_get_contents(__DIR__ . '/exam.js')?> 
     </script>
   </head>
   <body data-rsssl=1 data-rsssl=1>

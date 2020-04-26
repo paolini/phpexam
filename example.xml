@@ -1,0 +1,76 @@
+<?xml version='1.0' standalone='yes'?>
+<exam 
+    course='Scuola della vita'  
+    name='Prova scritta n. 1'
+    date='1.4.2020'
+    secret='shhht!' 
+    admins='pippo,pluto' 
+    storage_path='example-storage'
+>
+    <shuffle>
+        <variants>
+            <exercise>
+                Calcolare 
+                \[
+                  \sum_{k=1}^{100} k
+                \]
+                <question id="gauss">
+                    La somma è:
+                    <answer>
+                    5050
+                    </answer>
+                </question>
+            </exercise>
+            <exercise>
+                Calcolare 
+                \[
+                  \sum_{k=1}^{50} 2k
+                \]
+                <question id="gauss">
+                    La somma è:
+                    <answer>
+                    2550
+                    </answer>
+                </question>
+            </exercise>
+        </variants>
+        <variants>            
+            <exercise>
+                Si consideri l'equazione
+                \[
+                  x^2-2x+1 = 0
+                \]
+                <question id="n_soluzioni">
+                Quante sono le soluzioni distinte?
+                    <answer>
+                        1
+                    </answer>
+                </question>
+                <question id="soluzioni">
+                Scrivere le soluzioni:
+                    <answer>
+                    \( x_{1,2}=1 \)
+                    </answer>
+                </question>
+            </exercise>
+            <exercise>
+                Si consideri l'equazione
+                \[
+                  x^2-1 = 0
+                \]
+                <question id="n_soluzioni">
+                Quante sono le soluzioni distinte?
+                    <answer>
+                        2
+                    </answer>
+                </question>
+                <question id="soluzioni">
+                Scrivere le soluzioni:
+                    <answer>
+                    \( x_1=1, x_2=-1 \)
+                    </answer>
+                </question>
+            </exercise>
+        </variants>
+    </shuffle>
+</exam>
