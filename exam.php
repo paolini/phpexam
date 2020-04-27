@@ -69,8 +69,8 @@ function authenticate() {
     $m = $matches[0];
     $user['nome'] = $m['givenname'][0];
     $user['cognome'] = $m['sn'][0];
-    $user['common_name'] = $m['cn'][0];
-    $user['matricola'] = $role == 'student' ? $m['unipistudentematricola'][0] : $ldapUser;
+    // $user['common_name'] = $m['cn'][0];
+    $user['matricola'] = array_get($m, 'unipistudentematricola',[$ldapUser])[0];
     $user['authenticated'] = true;
     ldap_close($ldapConnection);
 
@@ -217,6 +217,16 @@ function my_explode($separator, $string) {
     return array_filter(explode($separator, $string), function($x) {return $x !== '';});
 }
 
+function my_timestamp($date, $time) {
+    if ($date === null || $time === null) return null;
+    try {
+        return DateTime::createFromFormat("j.n.Y H:i", $date . ' ' . $time)->getTimestamp();
+    } catch (Exception $e) {
+        error_log("invalid date/ time $date $time\n");
+        return null;
+    }
+}
+
 class Exam {
     function __construct($xml_filename, $exam_id) {
         $this->exam_id = $exam_id;
@@ -234,27 +244,48 @@ class Exam {
         $root = $this->xml_root;
         $this->secret = array_get($root, 'secret', '');
         $this->admins = my_explode(',', array_get($root, 'admins', ''));
+        $this->course = array_get($root, 'course');
+        $this->name = array_get($root, 'name');
+        $this->auth_methods = my_explode(',', array_get($root, 'auth_methods', 'ldap'));
+        
+        $this->date = array_get($root, 'date');
+        $this->time = array_get($root, 'time');
+        $this->end_time = array_get($root, 'end_time');
+        $this->duration_minutes = array_get($root, 'duration_minutes');
+        $this->timestamp = my_timestamp($this->date, $this->time);
+        $this->end_timestamp = my_timestamp($this->date, $this->end_time);
+        
         $this->storage_path = array_get($root, 'storage_path', $this->exam_id);
         if (substr($this->storage_path, 0, 1) !== '/') {
             // relative path
             $this->storage_path = __DIR__ . '/' . $this->storage_path;
         }
-        $this->course = array_get($root, 'course');
-        $this->name = array_get($root, 'name');
-        $this->date = array_get($root, 'date');
-        $this->auth_methods = my_explode(',', array_get($root, 'auth_methods', 'ldap'));
+        if (!is_dir($this->storage_path)) {
+            mkdir($this->storage_path);
+        }
+        
+        $this->now = time();
+        $this->is_open = True;
+        $this->seconds_to_start = 0;
+        if ($this->timestamp && $this->now < $this->timestamp) {
+            $this->is_open = False;
+            $this->seconds_to_start = $this->timestamp - $this->now;
+        } 
+        if ($this->end_timestamp && $this->now > $this->end_timestamp) {
+            $this->is_open = False;
+        }
     }
-
+    
     function login($user) {
         $this->is_admin = in_array($user['matricola'], $this->admins);
-        $this->matricola = $user['matricola'];    
-        $this->logged_in = true;
+        $this->user = $user;
+        $this->storage_filename = $this->storage_path . "/" . $user['matricola'] . ".jsons";
     }
     
     function compose($options) {
-        if (!isset($this->logged_in)) throw new Exception('Call Exam::login before Exam::compose');
+        if (!isset($this->user)) throw new Exception('Call Exam::login before Exam::compose');
         $this->options = $options;
-        $matricola = $this->matricola;
+        $matricola = $this->user['matricola'];
         if ($this->is_admin) { // admin può chiedere il compito di altri
             $matricola = array_get($options, 'matricola', $matricola);
         }
@@ -263,6 +294,29 @@ class Exam {
         $this->exercise_count = 0;
         $this->variant_count = 0;
         $this->text = $this->recurse_parse($this->xml_root);
+        $this->seconds_to_finish = null;
+
+        // calcola il tempo che manca alla fine del compito
+        // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
+
+        if ($this->duration_minutes !== null && !$this->is_admin) {
+            $start = $this->read('compito');
+            if ($start === null) {
+                $this->seconds_to_finish = $this->duration_minutes * 60;
+            } else {
+                error_log(json_encode($start));
+                $this->seconds_to_finish = $start['timestamp'] + $this->duration_minutes * 60 - $this->now;
+            }
+        }
+
+        // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
+        // non deve superare il tempo massimo
+        if ($this->end_timestamp !== null && !$this->is_admin) {
+            $s = $this->end_timestamp - $this->now;
+            if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
+                $this->seconds_to_finish = $s;
+            }
+        }
     }
 
     function recurse_parse($xml) {
@@ -345,13 +399,12 @@ class Exam {
         throw new ExamError("elemento XML inatteso <$name>");
     }
 
-    function write($user, $action, $object) {
-        if (!is_dir($this->storage_path)) {
-            mkdir($this->storage_path);
-        }
-        $filename = $this->storage_path . "/" . $user['matricola'] . ".jsons";
-        # error_log("writing to file " . $filename);
-        $fp = fopen($filename, "at") or die("Cannot write file!");
+    function write($action, $object) {
+        if (!isset($this->user) || !isset($this->storage_filename)) throw new Exception('Call Exam::login before Exam::write');
+        $user = $this->user;
+        # error_log("writing to file " . $this->storage_filename);
+        $fp = fopen($this->storage_filename, "at");
+        if ($fp === False) throw new Exception('Cannot write file ' + $this->storage_filename);
         $timestamp = date(DATE_ATOM);
         fwrite($fp, json_encode([
             'timestamp' => $timestamp,
@@ -361,7 +414,29 @@ class Exam {
         fclose($fp);
         return $timestamp;
     } 
-    
+
+    function read($action,$first=True) {
+        if (!isset($this->storage_filename)) throw new Exception('Call Exam::login before Exam::write');
+        error_log(">>>reading " . $this->storage_filename . "\n");
+        $found = null;
+        if (!file_exists($this->storage_filename)) return $found;
+        $fp = fopen($this->storage_filename, "rt");
+        if ($fp === False) throw new Exception('Cannot read file ' . $this->storage_filename);
+        while(True) {
+            $line = trim(fgets($fp));
+            if ($line === False) break; // eof
+            if ($line === "") continue;
+            $obj = json_decode($line, True);
+            error_log(">>line: " . json_encode($obj) . "\n");
+            if (isset($obj[$action])) {
+                $found = $obj;
+                if ($first) break; // find first line 
+            }
+        }
+        fclose($fp);
+        $found['timestamp'] = DateTime::createFromFormat(DateTime::ATOM,$found['timestamp'])->getTimestamp();
+        return $found;
+        }
 }
 
 function get_login($exam, $user) {
@@ -376,17 +451,26 @@ function get_login($exam, $user) {
 
 function get_compito($exam, $user, $options) {
     $exam->login($user);
-    $exam->compose($options);
     $response = [];
     $response['user'] = $user;
-    $exam->write($user, "compito", [
+    $response['timestamp'] = $exam->timestamp;
+    $response['end_timestamp'] = $exam->end_timestamp;
+    $response['duration_minutes'] = $exam->duration_minutes;
+    $response['seconds_to_start'] = $exam->seconds_to_start;
+    $response['is_admin'] = $exam->is_admin;
+    $response['is_open'] = $exam->is_open;
+    $response['ok'] = True;
+    if (!$exam->is_open && !$exam->is_admin) {
+        return $response; // non mostrare il testo del compito!
+    }
+    $exam->compose($options);
+    $exam->write("compito", [
         'is_admin' => $exam->is_admin,
         'text' => $exam->text,
         'answers' => $exam->answers
         ]);
     $response['text'] = $exam->text;
-    $response['is_admin'] = $exam->is_admin;
-    $response['ok'] = True;
+    $response['seconds_to_finish'] = $exam->seconds_to_finish;
     return $response;
 }
 
@@ -412,7 +496,7 @@ function submit($exam, $user) {
     }
     // error_log("risposte: " . json_encode($compito->risposte));
     
-    $response['timestamp'] = $exam->write($user, "submit", $exam->answers);
+    $response['timestamp'] = $exam->write("submit", $exam->answers);
     $response['ok'] = True;
     $response['message'] = "risposte inviate!";
     return $response;
@@ -502,7 +586,7 @@ echo json_encode(serve($exam));
   <body data-rsssl=1 data-rsssl=1>
       <h2><?php echo("{$exam->course}"); ?></h2>
       <h3><?php echo("{$exam->name}"); ?></h3>
-      <h3><?php echo("{$exam->date}"); ?></h3>
+      <h3><?php echo("{$exam->date}"); if ($exam->time) echo(" ore {$exam->time}"); ?></h3>
     <h3 id="error" style="color:red" hidden></h3>
     <div id="auth">
         <table style="display:inline-block;">
@@ -551,6 +635,9 @@ echo json_encode(serve($exam));
                 Allo scadere del tempo verrà considerata l'ultima versione inviata. 
                 Nei 15 minuti dopo lo scadere del tempo si dovrà inviare copia degli appunti dove risultino tutti i passaggi svolti.
             </p>
+        </div>
+        <div>            
+            <div id="timer"></div>
             <button id="submit" hidden>invia risposte</button>
             <div id="response" style="color:blue"></div>
         </div>
