@@ -49,9 +49,12 @@ function submit(data) {
     post.password = $("#password").val();
     post.action = "submit";
 
+    var new_answers = {};
     data.text.exercises.forEach(function(exercise) {
         exercise.questions.forEach(function(question) {
-            post['answer_' + question.form_id] = $("#question_" + question.form_id).val();
+            var val = $("#question_" + question.form_id).val();
+            post['answer_' + question.form_id] = val;
+            new_answers[question.form_id] = val;
         })
     });
     
@@ -72,16 +75,13 @@ function submit(data) {
             $("#response").text(msg);
         }
         if (response.ok == true) {
-            $("#response").css("color", "blue");
-            data.text.exercises.forEach(function(exercise) {
-                exercise.questions.forEach(function(question) {
-                    if ($("#question_" + question.form_id).val() == "") {
-                        $("#check_" + question.form_id).css("color", "black");
-                    } else {
-                        $("#check_" + question.form_id).css("color", "green");
-                    }
-                })
-            })
+            data.answers = new_answers;
+            Object.entries(new_answers).forEach(function(item){
+                var key = item[0];
+                var val = item[1];
+                data.answers[key] = val;
+                $("#question_" + key).change();
+            });
         } else {
             $("#response").css("color", "red");
         }
@@ -103,13 +103,17 @@ function seconds_to_human_string(s) {
         msg += "-";
         s = -s;
     }
+    var show_seconds = s < 60*5;
     var h = Math.floor(s / 3600);
     s -= h*3600;
     var m = Math.floor(s / 60);
     s -= m*60;
     if (h>0) msg += h.toString() + (h==1 ? " ora, " : " ore, ");
-    if (h>0 || m>0) msg += m.toString() + (m==1 ? " minuto e " : " minuti e ");
-    msg += s.toString() + (s==1 ? " secondo" : " secondi");
+    if (h>0 || m>0) msg += m.toString() + (m==1 ? " minuto" : " minuti");
+    if (show_seconds) {
+        if (m>0) msg += " e ";
+        msg += s.toString() + (s==1 ? " secondo" : " secondi");
+    }
     return msg;
 }
 
@@ -127,21 +131,28 @@ function main(data) {
     $exercises.empty();
     $exercises.append("<br>\n");
     if (data.text) { // abbiamo il testo del compito!
+        if (!data.answers) data.answers = {};
         data.text.exercises.forEach(function(exercise, i) {
             $exercises.append("<b>Esercizio " + (exercise.number) + ":</b> " + exercise.statement + "<br />");
             exercise.questions.forEach(function(question) {
+                var answer = "";
+                if (data.answers.hasOwnProperty(question.form_id)) {
+                    answer = data.answers[question.form_id];
+                }
                 $exercises.append(""
                 + "<span class='check' id='check_" + question.form_id + "'>&#9632;</span> "
                 + "<i>" + question.statement + "</i> "
-                + "<input id='question_" + question.form_id + "'>"
+                + "<input id='question_" + question.form_id + "' value='" + answer + "'>"
                 + "<br />");
                 if (question.solution) {
                     $exercises.append("<span style='color:red'>" + question.solution + "</span><br />\n");
                 }
                 $("#question_" + question.form_id).change(function() {
-                    $("#check_" + question.form_id).css("color", "red");
-                    $("#response").empty();                
-                })
+                    var val = $(this).val();
+                    var changed = (val != data.answers[question.form_id]);
+                    $("#check_" + question.form_id).css("color", val==""?"black":changed?"red":"green");
+                    if (changed) $("#response").empty();                
+                }).change();
             });
             $exercises.append("<br /><br />");
         });
@@ -153,7 +164,7 @@ function main(data) {
 
         $("#timer").empty();
         if (data.seconds_to_finish !== null) {
-            if (data.seconds_to_finish >= 0) {
+            if (data.seconds_to_finish > 0) {
                 var target_time = Date.now() + 1000*data.seconds_to_finish;
                 timer = window.setInterval(function() {
                     var s = Math.round((target_time - Date.now())/1000);
@@ -163,7 +174,12 @@ function main(data) {
                     else if (s< 5*60) color = "orange";
                     else color = "blue";
                     $("#timer").html("<span style='color:" + color + "'>Tempo rimanente: " + seconds_to_human_string(s) + "</span>");
+                    if (s <= 0) {
+                        $("#submit").hide();
+                    }
                 }, 1000);
+            } else {
+                $("#submit").hide();
             }
         }
     } else {

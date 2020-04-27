@@ -2,11 +2,14 @@
 <exam 
     course='Nome di un bel corso'  
     name='Prova scritta di esempio'
-    date='1.4.2020'
+    date='28.4.2020'
+    time='00:01'
+    end_time='23:59'
+    duration_minutes='19'
     secret='shhht!' 
     admins='pippo,pluto' 
     storage_path='example-storage'
-    auth_methods='ldap'
+    auth_methods='ldap,fake'
 >
     <shuffle>
         <variants>
