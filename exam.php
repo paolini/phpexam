@@ -14,8 +14,10 @@ function authenticate() {
         'authenticated' => false
     ];
     
-    global $successMessage, $errorMessage, $authenticated;
-    
+    if (!function_exists("ldap_connect")) {
+        error_log("ldap not installed... failing ldap authentication");
+        return $user; // failed!!
+    }   
     $ldapConnection = ldap_connect($ldapHost, $ldapPort);
     
     if (!$ldapConnection) {
@@ -210,6 +212,10 @@ class ExamError extends Exception {
     }
 }
 
+function my_explode($separator, $string) {
+    // explodes string into array and removes empty strings
+    return array_filter(explode($separator, $string), function($x) {return $x !== '';});
+}
 
 class Exam {
     function __construct($xml_filename, $exam_id) {
@@ -225,16 +231,18 @@ class Exam {
             throw new Exception($message);
         }
     
-        $this->secret = array_get($this->xml_root, 'secret', '');
-        $this->admins = array_filter(explode(',', array_get($this->xml_root, 'admins', '')), function($x) {return $x !== '';});
-        $this->storage_path = array_get($this->xml_root, 'storage_path', $this->exam_id);
+        $root = $this->xml_root;
+        $this->secret = array_get($root, 'secret', '');
+        $this->admins = my_explode(',', array_get($root, 'admins', ''));
+        $this->storage_path = array_get($root, 'storage_path', $this->exam_id);
         if (substr($this->storage_path, 0, 1) !== '/') {
             // relative path
             $this->storage_path = __DIR__ . '/' . $this->storage_path;
         }
-        $this->course = array_get($this->xml_root, 'course');
-        $this->name = array_get($this->xml_root, 'name');
-        $this->date = array_get($this->xml_root, 'date');
+        $this->course = array_get($root, 'course');
+        $this->name = array_get($root, 'name');
+        $this->date = array_get($root, 'date');
+        $this->auth_methods = my_explode(',', array_get($root, 'auth_methods', 'ldap'));
     }
 
     function login($user) {
@@ -416,8 +424,13 @@ function error_response($error_message) {
 
 function serve($exam) {
     try {
-        $user = fake_authenticate();
-        if (!$user['authenticated']) return error_response("utente non autenticato");
+        foreach($exam->auth_methods as $auth) {
+            error_log("trying " . $auth);
+            if ($auth === 'ldap') $user = authenticate();
+            else if ($auth === 'fake') $user = fake_authenticate();
+            if ($user['authenticated']) break;
+        }
+        if (!$user['authenticated']) return error_response("utente non riconosciuto");            
 
         $action = array_get($_POST, 'action');
         
@@ -518,10 +531,31 @@ echo json_encode(serve($exam));
             mostra varianti:  <input id="show_variants" type="checkbox" checked><br />
             cambia matricola: <input id="set_matricola"><br />
         </div>
+        <div>
+            Si suggerisce di usare notazioni semplici ma chiare per scrivere le formule nelle caselle di risposta
+            (non scrivere in \(\LaTeX\)).
+            Ad esempio per descrivere la formula \(\frac{\sqrt{\frac 3 4 \pi+1}}{\sqrt[3]{c_1} + x^{2+e}}\)
+            si scriva: 
+            <pre>
+                sqrt(3/4*pi + 1) / (sqrt^3(c_1) + x^(2+e))
+            </pre>
+            Per scrivere \(\alpha, +\infty, \mathbb R, \forall, \exists, &lt;, &gt;, \ge, \le\) si scriva:
+            <pre>
+                alfa, +oo, R, per ogni, esiste, &lt;, &gt;, >=, <=
+            </pre>
+        </div>
+        <div>
+            <p>
+                Si compilino le caselle con le risposte e si prema il pulsante di invio man mano che vengono risolti (o modificati) gli esercizi.
+                I tempi di risposta devono coincidere con i tempi utilizzati per lo svolgimento.
+                Allo scadere del tempo verrà considerata l'ultima versione inviata. 
+                Nei 15 minuti dopo lo scadere del tempo si dovrà inviare copia degli appunti dove risultino tutti i passaggi svolti.
+            </p>
+            <button id="submit" hidden>invia risposte</button>
+            <div id="response" style="color:blue"></div>
+        </div>
         <div id="exercises">
         </div>
-        <button id="submit" hidden>invia risposte</button>
-        <div id="response" style="color:blue"></div>
     </div>
   </body>
 </html>

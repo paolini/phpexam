@@ -1,11 +1,12 @@
 <?xml version='1.0' standalone='yes'?>
 <exam 
-    course='Scuola della vita'  
-    name='Prova scritta n. 1'
+    course='Nome di un bel corso'  
+    name='Prova scritta di esempio'
     date='1.4.2020'
     secret='shhht!' 
     admins='pippo,pluto' 
     storage_path='example-storage'
+    auth_methods='ldap'
 >
     <shuffle>
         <variants>

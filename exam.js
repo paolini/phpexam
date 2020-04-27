@@ -29,9 +29,6 @@ function load(action) {
         }
         $("#auth_error").text("").hide();
         $("#auth").hide();
-        if (data.user.is_fake) {
-            $("#user_div").css("background","red");
-        }
         if (action == 'reload') main(data);
         else login(data);
     });
@@ -58,25 +55,33 @@ function submit(data) {
         })
     });
     
-    $.post("", post, function(data, status) {
-        if (data.user.authenticated) {
+    $.post("", post, function(response, status) {
+        if (response.user.authenticated) {
             $("#auth_error").text("").hide();
             $("#auth").hide();
         } else {
-            $("#auth_error").text(data.user.error || "errore interno #231").show();
+            $("#auth_error").text(response.user.error || "errore interno #231").show();
             $("#auth_error").show();
             $("#auth").show();
         }
-        if (data.message) {
-            msg = data.message;
-            if (data.timestamp) {
-                msg = timestamp_to_string(new Date(data.timestamp)) + ": " + msg;
+        if (response.message) {
+            msg = response.message;
+            if (response.timestamp) {
+                msg = timestamp_to_string(new Date(response.timestamp)) + ": " + msg;
             }
             $("#response").text(msg);
         }
-        if (data.ok == true) {
+        if (response.ok == true) {
             $("#response").css("color", "blue");
-            $("span.check").css("color", "green");
+            data.text.exercises.forEach(function(exercise) {
+                exercise.questions.forEach(function(question) {
+                    if ($("#question_" + question.form_id).val() == "") {
+                        $("#check_" + question.form_id).css("color", "black");
+                    } else {
+                        $("#check_" + question.form_id).css("color", "green");
+                    }
+                })
+            })
         } else {
             $("#response").css("color", "red");
         }
