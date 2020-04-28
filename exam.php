@@ -220,11 +220,17 @@ function my_explode($separator, $string) {
 function my_timestamp($date, $time) {
     if ($date === null || $time === null) return null;
     try {
+        error_log("my_timestamp ".json_encode($date). " ". json_encode( $time));
         return DateTime::createFromFormat("j.n.Y H:i", $date . ' ' . $time)->getTimestamp();
     } catch (Exception $e) {
         error_log("invalid date/ time $date $time\n");
         return null;
     }
+}
+
+function my_xml_get($xml, $key, $default=null) {
+    if (isset($xml[$key])) return (string) $xml[$key];
+    return $default;
 }
 
 class Exam {
@@ -242,30 +248,32 @@ class Exam {
         }
     
         $root = $this->xml_root;
-        $this->secret = array_get($root, 'secret', '');
-        $this->admins = my_explode(',', array_get($root, 'admins', ''));
-        $this->course = array_get($root, 'course');
-        $this->name = array_get($root, 'name');
-        $this->auth_methods = my_explode(',', array_get($root, 'auth_methods', 'ldap'));
+        $this->secret = my_xml_get($root, 'secret', '');
+        $this->admins = my_explode(',', my_xml_get($root, 'admins', ''));
+        $this->course = my_xml_get($root, 'course');
+        $this->name = my_xml_get($root, 'name');
+        $this->auth_methods = my_explode(',', my_xml_get($root, 'auth_methods', 'ldap'));
         
-        $this->date = array_get($root, 'date');
-        $this->time = array_get($root, 'time');
-        $this->end_time = array_get($root, 'end_time');
-        $this->duration_minutes = array_get($root, 'duration_minutes');
+        $this->date = my_xml_get($root, 'date');
+        $this->time = my_xml_get($root, 'time');
+        $this->end_time = my_xml_get($root, 'end_time');
+        $this->duration_minutes = (int) my_xml_get($root, 'duration_minutes');
+
         $this->timestamp = my_timestamp($this->date, $this->time);
         $this->end_timestamp = my_timestamp($this->date, $this->end_time);
         
-        $this->storage_path = array_get($root, 'storage_path', $this->exam_id);
+        $this->storage_path = my_xml_get($root, 'storage_path', $this->exam_id);
         if (substr($this->storage_path, 0, 1) !== '/') {
             // relative path
             $this->storage_path = __DIR__ . '/' . $this->storage_path;
         }
         if (!is_dir($this->storage_path)) {
-            mkdir($this->storage_path);
+            mkdir($this->storage_path, 0777, True);
         }
         
         $this->now = time();
         $this->is_open = True;
+        $this->start_timestamp = null;
         $this->seconds_to_start = 0;
         if ($this->timestamp && $this->now < $this->timestamp) {
             $this->is_open = False;
@@ -278,48 +286,61 @@ class Exam {
         error_log("IS OPEN {$this->is_open}");
     }
     
-    function login($user) {
-        $this->is_admin = in_array($user['matricola'], $this->admins);
-        $this->user = $user;
-        $this->storage_filename = $this->storage_path . "/" . $user['matricola'] . ".jsons";
+    function is_admin($matricola) {
+        return in_array($matricola, $this->admins);
+    }
+
+    function start() {
+        $this->start_timestamp = $this->now;
+    }
+
+    function compose_for($matricola, $options=[]) {
+        $this->matricola = $matricola;
+        $this->storage_filename = $this->storage_path . "/" . $matricola . ".jsons";
+
+        if ($this->start_timestamp === null) {
+            // bisogna controllare se il compito e' gia' partito
+            $start = $this->read('start', False); // attenzione: non bisogna permettere di rifare uno start, prendiamo l'ultimo
+            if ($start === null) {
+                $this->start_timestamp = null;
+            } else {
+                $this->start_timestamp = $start['timestamp'];
+                if ($this->timestamp !== null && $this->timestamp > $this->start_timestamp) {
+                    /*
+                    * se l'ultimo start e' anteriore alla data di inizio il compito e' stato riproposto
+                    */
+                    $this->start_timestamp = null;
+                }
+            }
+        } else {
+            // e' stato chiamato $this->start() per avviare immediatamente il compito
+        }
 
         $this->seconds_to_finish = null;
-        // calcola il tempo che manca alla fine del compito
-        // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
+        if ($this->start_timestamp !== null) {
+            // calcola il tempo che manca alla fine del compito
+            // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
 
-        if ($this->duration_minutes !== null && !$this->is_admin) {
-            $start = $this->read('compito');
-            if ($start === null) {
-                $this->seconds_to_finish = $this->duration_minutes * 60;
-            } else {
-                error_log(json_encode($start));
-                $this->seconds_to_finish = $start['timestamp'] + $this->duration_minutes * 60 - $this->now;
+            if ($this->duration_minutes !== null) {
+                $this->seconds_to_finish = $this->start_timestamp + $this->duration_minutes * 60 - $this->now;
+            }
+
+            // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
+            // non deve superare il tempo massimo
+            if ($this->end_timestamp !== null) {
+                $s = $this->end_timestamp - $this->now;
+                if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
+                    $this->seconds_to_finish = $s;
+                }
+            }
+
+            if ($this->seconds_to_finish !== null && $this->seconds_to_finish <=0) {
+                $this->seconds_to_finish = 0;
             }
         }
 
-        // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
-        // non deve superare il tempo massimo
-        if ($this->end_timestamp !== null && !$this->is_admin) {
-            $s = $this->end_timestamp - $this->now;
-            if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
-                $this->seconds_to_finish = $s;
-            }
-        }
-
-        if ($this->seconds_to_finish !== null && $this->seconds_to_finish <=0) {
-            $this->seconds_to_finish = 0;
-        }
-        error_log("SECONDS 3 {$this->seconds_to_finish}");
-    }
-    
-    function compose($options) {
-        if (!isset($this->user)) throw new Exception('Call Exam::login before Exam::compose');
         $this->options = $options;
-        $matricola = $this->user['matricola'];
-        if ($this->is_admin) { // admin può chiedere il compito di altri
-            $matricola = array_get($options, 'matricola', $matricola);
-        }
-        $this->rand = new MyRand($this->secret . '_' . $matricola);
+        $this->rand = new MyRand($this->secret . '_' . $this->matricola);
         $this->answers = [];
         $this->exercise_count = 0;
         $this->variant_count = 0;
@@ -341,7 +362,7 @@ class Exam {
         if ($name === 'shuffle') {
             $lst = [];
             $children = $xml->children();
-            if ($this->is_admin && array_get($this->options, 'variants')) { // only admin: don't shuffle
+            if (array_get($this->options, 'variants')) { // don't shuffle
                 // nop
             } else {
                 $children = $this->rand->shuffled($children);
@@ -352,7 +373,7 @@ class Exam {
             return $lst;
         }
         if ($name === 'variants') {
-            if ($this->is_admin && array_get($this->options, 'variants')) { // only admin: show all variants
+            if (array_get($this->options, 'variants')) { // show all variants
                 $lst = [];
                 $fix_count = $this->exercise_count;
                 foreach($xml->children() as $child) {
@@ -395,7 +416,7 @@ class Exam {
             foreach($xml->children() as $child) {
                 if ($child->getName() === 'answer') {
                     $answer['solution'] = trim((string) $child);
-                    if ($this->is_admin && array_get($this->options,'solutions')) { // only admin: show solutions
+                    if (array_get($this->options,'solutions')) { // show solutions
                         $obj['solution'] = trim((string) $child);
                     }
                 }
@@ -406,9 +427,8 @@ class Exam {
         throw new ExamError("elemento XML inatteso <$name>");
     }
 
-    function write($action, $object) {
-        if (!isset($this->user) || !isset($this->storage_filename)) throw new Exception('Call Exam::login before Exam::write');
-        $user = $this->user;
+    function write($user, $action, $object) {
+        if (!isset($this->storage_filename)) throw new Exception('Call Exam::login before Exam::write');
         # error_log("writing to file " . $this->storage_filename);
         $fp = fopen($this->storage_filename, "at");
         if ($fp === False) throw new Exception('Cannot write file ' + $this->storage_filename);
@@ -424,7 +444,7 @@ class Exam {
 
     function read($action,$first=True) {
         if (!isset($this->storage_filename)) throw new Exception('Call Exam::login before Exam::write');
-        error_log(">>>reading " . $this->storage_filename . "\n");
+        // error_log(">>>reading " . $this->storage_filename . "\n");
         $found = null;
         if (!file_exists($this->storage_filename)) return $found;
         $fp = fopen($this->storage_filename, "rt");
@@ -435,7 +455,7 @@ class Exam {
             $line = trim($line);
             if ($line === "") continue;
             $obj = json_decode($line, True);
-            error_log(">>line: " . json_encode($obj) . "\n");
+            // error_log(">>line: " . json_encode($obj) . "\n");
             if (isset($obj[$action])) {
                 $found = $obj;
                 if ($first) break; // find first line 
@@ -447,58 +467,47 @@ class Exam {
         }
 }
 
-function get_login($exam, $user) {
-    $exam->login($user);
-    $response = [
-        'user' => $user,
-        'is_admin' => $exam->is_admin,
-        'ok' => True
-    ];
-    return $response;
-}
-
-function get_compito($exam, $user, $options) {
-    $exam->login($user);
+function get_compito($exam, $user) {
     $response = [];
     $response['user'] = $user;
+    $response['matricola'] = $exam->matricola;
     $response['timestamp'] = $exam->timestamp;
     $response['end_timestamp'] = $exam->end_timestamp;
+    $response['end_time'] = $exam->end_time;
     $response['duration_minutes'] = $exam->duration_minutes;
     $response['seconds_to_start'] = $exam->seconds_to_start;
-    $response['is_admin'] = $exam->is_admin;
     $response['is_open'] = $exam->is_open;
     $response['ok'] = True;
-    if (!$exam->is_open && !$exam->is_admin) {
-        return $response; // non mostrare il testo del compito!
-    }
-    $exam->compose($options);
-    $exam->write("compito", [
-        'is_admin' => $exam->is_admin,
-        'text' => $exam->text,
-        'answers' => $exam->answers
-        ]);
-    $response['text'] = $exam->text;
-    $response['seconds_to_finish'] = $exam->seconds_to_finish;
 
-    $answers = [];
-    if (!$exam->is_admin) { // carica le ultime risposte date
+    if ($exam->start_timestamp !== null || array_get($user, 'is_admin')) {
+        // lo studente ha iniziato (e forse anche finito) l'esame
+        // oppure siamo admin
+        // in tal caso possiamo mostrare il compito
+
+        $exam->write($user, "compito", [
+            'text' => $exam->text,
+            'answers' => $exam->answers
+            ]);
+        $response['text'] = $exam->text;
+        $response['seconds_to_finish'] = $exam->seconds_to_finish;
+
+        $answers = [];
         $obj = $exam->read('submit', False);
         if ($obj !== null) {
             foreach($obj['submit'] as $item) {
                 $answers[$item['form_id']] = $item['answer'];
             }
         }
+        if (count($answers) === 0) {
+            $answers = null; // empty array is otherwise encoded as array instead of dictionary
+        }
+        $response['answers'] = $answers;
     }
-    if (count($answers) === 0) {
-        $answers = null; // empty array is otherwise encoded as array instead of dictionary
-    }
-    $response['answers'] = $answers;
 
     return $response;
 }
 
 function submit($exam, $user) {
-    $exam->login($user);
     $response = [];
     $response['user'] = $user;
     $response['ok'] = False;
@@ -506,28 +515,40 @@ function submit($exam, $user) {
         $response['message'] = "utente non autenticato!";
         return;
     }
-    if (!$exam->is_open) {
-        $response['message'] = "il compito è chiuso, non è possibile inviare le risposte";
-        return $response;
+
+    $matricola = $user['matricola'];
+    $is_admin = array_get($user, 'is_admin');
+
+    if ($is_admin) {
+        $matricola = array_get($_POST['matricola'], $matricola);
     }
-    if ($exam->seconds_to_finish !== null && $exam->seconds_to_finish <= 0) {
-        $response['message'] = "tempo scaduto, non è più possibile inviare le risposte.";
-        return $response;
+
+    $exam->compose_for($matricola);
+
+    if (!$is_admin) {
+        if (!$exam->is_open) {
+            $response['message'] = "il compito è chiuso, non è possibile inviare le risposte";
+            return $response;
+        }
+        if ($exam->seconds_to_finish !== null && $exam->seconds_to_finish <= 0) {
+            $response['message'] = "tempo scaduto, non è più possibile inviare le risposte.";
+            return $response;
+        }
     }
     
-    $exam->compose($user, []);
     foreach($exam->answers as &$answer) {
         $key = 'answer_' . $answer['form_id'];
-        if (!isset($_POST[$key])) {
+        $val = array_get($_POST, $key);
+        if ($val === null) {
             error_log(json_encode($_POST));
             $response['message'] = 'richiesta non valida';
             return $response;
         }
-        $answer['answer'] = $_POST[$key];
+        $answer['answer'] = $val;
     }
     // error_log("risposte: " . json_encode($compito->risposte));
     
-    $response['timestamp'] = $exam->write("submit", $exam->answers);
+    $response['timestamp'] = $exam->write($user, "submit", $exam->answers);
     $response['ok'] = True;
     $response['message'] = "risposte inviate!";
     return $response;
@@ -545,22 +566,39 @@ function serve($exam) {
             else if ($auth === 'fake') $user = fake_authenticate();
             if ($user['authenticated']) break;
         }
-        if (!$user['authenticated']) return error_response("utente non riconosciuto");            
+        if (!$user['authenticated']) return error_response("utente non riconosciuto");   
+        
+        $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
 
         $action = array_get($_POST, 'action');
         
-        if ($action === "login") return get_login($exam, $user);
-
-        if ($action === "reload") {
-            $options = [
-                'matricola' => array_get($_POST, 'matricola'),
-                'solutions' => (array_get($_POST, 'solutions') === 'true'),
-                'variants' => (array_get($_POST, 'variants') === 'true')
-            ];
-            return get_compito($exam, $user, $options);
-        }  
+        if ($action === 'reload' || $action === 'login') {
+            $matricola = $user['matricola'];
+            if ($user['is_admin']) {
+                $matricola = array_get($_POST, 'matricola', $matricola);
+                $options = [
+                    'solutions' => (array_get($_POST, 'solutions') === 'true'),
+                    'variants' => (array_get($_POST, 'variants') === 'true')
+                ];
+                $exam->compose_for($matricola, $options);            
+            } else {
+                // non admins cannot inspect variations
+                $exam->compose_for($matricola);
+            }
+            return get_compito($exam, $user);
+        }
         
-        if ($action === 'submit') return submit($exam, $user);
+        if ($action === 'start') {
+            $matricola = $user['matricola'];
+            $exam->start();
+            $exam->compose_for($matricola);
+            $exam->write($user, 'start', True); /* segnamo l'inizio del compito */
+            return get_compito($exam, $user);
+        }
+        
+        if ($action === 'submit') {
+            return submit($exam, $user);
+        }
 
         return error_response("richiesta non valida");
     } catch (ExamError $e) {
@@ -644,7 +682,7 @@ echo json_encode(serve($exam));
             <b>riservato agli amministratori:</b><br/>
             mostra soluzioni: <input id="show_solutions" type="checkbox" checked><br />
             mostra varianti:  <input id="show_variants" type="checkbox" checked><br />
-            cambia matricola: <input id="set_matricola"><br />
+            cambia matricola: <input id="set_matricola" disabled><br />
         </div>
         <div>
             Si suggerisce di usare notazioni semplici ma chiare per scrivere le formule nelle caselle di risposta
@@ -665,6 +703,11 @@ echo json_encode(serve($exam));
                 I tempi di risposta devono coincidere con i tempi utilizzati per lo svolgimento.
                 Allo scadere del tempo verrà considerata l'ultima versione inviata. 
                 Nei 15 minuti dopo lo scadere del tempo si dovrà inviare copia degli appunti dove risultino tutti i passaggi svolti.
+            </p>
+            <p><b>legenda:</b>
+            <span style='color:black'>&#9632;</span> risposta non data --
+            <span style='color:red'>&#9632;</span> risposta non inviata --
+            <span style='color:green'>&#9632;</span> risposta inviata            
             </p>
         </div>
         <div>            

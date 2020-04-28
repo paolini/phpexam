@@ -11,12 +11,10 @@ function load(action) {
     post.user = $("#user").val();
     post.password = $("#password").val();
     post.action = action;
-    if (action == 'reload') {
-        post.matricola = $("#set_matricola").val();
-        post.solutions = $("#show_solutions").prop('checked');
-        post.variants = $("#show_variants").prop('checked');
-        $("#set_matricola").prop('disabled', post.variants);
-    }
+    post.solutions = $("#show_solutions").prop('checked');
+    post.variants = $("#show_variants").prop('checked');
+    if (!post.variants) post.matricola = $("#set_matricola").val();
+    $("#set_matricola").prop('disabled', post.variants);
     clean_error();
     $.post("", post, function(data, status) {
         if (!data.ok) {
@@ -29,8 +27,7 @@ function load(action) {
         }
         $("#auth_error").text("").hide();
         $("#auth").hide();
-        if (action == 'reload') main(data);
-        else login(data);
+        main(data);
     });
 }
 
@@ -88,15 +85,6 @@ function submit(data) {
     });
 }
 
-function login(data) {
-    $("#cognome").text(data.user.cognome);
-    $("#nome").text(data.user.nome);
-    $("#matricola").text(data.user.matricola);
-    $("#set_matricola").val(data.user.matricola);
-    if (data.is_admin) $("#admin").show();
-    load("reload");
-}
-
 function seconds_to_human_string(s) {
     var msg = "";
     if (s<0) {
@@ -108,7 +96,7 @@ function seconds_to_human_string(s) {
     s -= h*3600;
     var m = Math.floor(s / 60);
     s -= m*60;
-    if (h>0) msg += h.toString() + (h==1 ? " ora, " : " ore, ");
+    if (h>0) msg += h.toString() + (h==1 ? " ora" : " ore" + (show_seconds?", ":" e "));
     if (h>0 || m>0) msg += m.toString() + (m==1 ? " minuto" : " minuti");
     if (show_seconds) {
         if (m>0) msg += " e ";
@@ -117,7 +105,7 @@ function seconds_to_human_string(s) {
     return msg;
 }
 
-var timer = null; // global singleton timer... don't leak!
+var timer = null; // global singleton timer... so we don't leak!
 
 function stop_timer() {
     if (timer != null) window.clearInterval(timer);
@@ -126,6 +114,13 @@ function stop_timer() {
 
 function main(data) {
     stop_timer();
+
+    $("#cognome").text(data.user.cognome);
+    $("#nome").text(data.user.nome);
+    $("#matricola").text(data.user.matricola);
+    $("#set_matricola").val(data.matricola);
+    if (data.user.is_admin) $("#admin").show();
+
     $("#text").show();
     var $exercises = $("#exercises");
     $exercises.empty();
@@ -158,7 +153,8 @@ function main(data) {
         });
         MathJax.Hub.Queue(["Typeset",MathJax.Hub]);
         $("#submit").show().click(function(){submit(data)});
-        $("#set_matricola").change(function(){load('reload')});
+        if (data.matricola != data.user.matricola) $("#submit").hide(); // evita di inviare dati di un utente impersonificato
+        $("#set_matricola").val(data.matricola).change(function(){load('reload')});
         $("#show_solutions").change(function(){load('reload')});
         $("#show_variants").change(function(){load('reload')});
 
@@ -166,6 +162,7 @@ function main(data) {
         if (data.seconds_to_finish !== null) {
             if (data.seconds_to_finish > 0) {
                 var target_time = Date.now() + 1000*data.seconds_to_finish;
+                stop_timer();
                 timer = window.setInterval(function() {
                     var s = Math.round((target_time - Date.now())/1000);
                     if (s<0) s = 0;
@@ -175,7 +172,9 @@ function main(data) {
                     else color = "blue";
                     $("#timer").html("<span style='color:" + color + "'>Tempo rimanente: " + seconds_to_human_string(s) + "</span>");
                     if (s <= 0) {
+                        $("#timer").html("<span style='color:" + color + "'>Tempo scaduto</span>");
                         $("#submit").hide();
+                        stop_timer();
                     }
                 }, 1000);
             } else {
@@ -183,24 +182,30 @@ function main(data) {
             }
         }
     } else {
+        // non abbiamo il testo del compito
         function display_start_button() {
             $exercises.html("<span style='color:blue'><b>Quando sei pronto puoi <button id='start_button'>iniziare!</button></b></span>");
-            $("#start_button").click(function(){load("reload");});
+            $("#start_button").click(function(){load("start");});
+            if (data.duration_minutes) {
+                $exercises.append("<p>Durata della prova " + seconds_to_human_string(data.duration_minutes*60) + ".</p>");
+            }
+            if (data.end_time) {
+                $exercises.append("<p>Consegna entro le ore " + data.end_time + ".</p>");
+            }
         }
-        // il testo non e' disponibile
         if (data.is_open) {
             display_start_button();
         } else {
             if (data.seconds_to_start > 0) {
-                var timer = null;
                 var target_time = Date.now() + 1000*data.seconds_to_start;
+                stop_timer();
                 timer = window.setInterval(function() {
                     var s = Math.round((target_time - Date.now()) / 1000);
                     if (s<0) s = 0;
                     $exercises.html("<span style='color:red'><b>Potrai iniziare il compito tra " + seconds_to_human_string(s) + "</b></span>");
                 }, 1000);
                 window.setTimeout(function() {
-                    window.clearInterval(timer);
+                    stop_timer();
                     display_start_button();
                 }, 1000*(data.seconds_to_start+1));
             } else {
