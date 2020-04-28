@@ -135,9 +135,9 @@ function main(data) {
                     answer = data.answers[question.form_id];
                 }
                 $exercises.append(""
-                + "<span class='check' id='check_" + question.form_id + "'>&#9632;</span> "
-                + "<i>" + question.statement + "</i> "
-                + "<input id='question_" + question.form_id + "' value='" + answer + "'>"
+                + "<span class='left'><span class='check' id='check_" + question.form_id + "'>&#9632;</span> "
+                + "<i>" + question.statement + "</i></span>"
+                + "<span class='fill'><input class='fill' id='question_" + question.form_id + "' value='" + answer + "'></span>"
                 + "<br />");
                 if (question.solution) {
                     $exercises.append("<span style='color:red'>" + question.solution + "</span><br />\n");
@@ -190,7 +190,7 @@ function main(data) {
                 $exercises.append("<p>Durata della prova " + seconds_to_human_string(data.duration_minutes*60) + ".</p>");
             }
             if (data.end_time) {
-                $exercises.append("<p>Consegna entro le ore " + data.end_time + ".</p>");
+                $exercises.append("<p>Comunque entro le ore " + data.end_time + ".</p>");
             }
         }
         if (data.is_open) {

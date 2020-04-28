@@ -651,6 +651,22 @@ echo json_encode(serve($exam));
     <script>
         <?php echo file_get_contents(__DIR__ . '/exam.js')?> 
     </script>
+    <style>
+span.fill {
+    display: block;
+    overflow: hidden;
+    padding-right: 5px;
+    padding-left: 10px;
+}
+
+input.fill {
+    width: 100%;
+}
+
+span.left {
+    float: left;
+}
+    </style>
   </head>
   <body data-rsssl=1 data-rsssl=1>
       <h2><?php echo("{$exam->course}"); ?></h2>
@@ -705,8 +721,8 @@ echo json_encode(serve($exam));
                 Nei 15 minuti dopo lo scadere del tempo si dovrà inviare copia degli appunti dove risultino tutti i passaggi svolti.
             </p>
             <p><b>legenda:</b>
-            <span style='color:black'>&#9632;</span> risposta non data --
-            <span style='color:red'>&#9632;</span> risposta non inviata --
+            <span style='color:black'>&#9632;</span> risposta non data,
+            <span style='color:red'>&#9632;</span> risposta non inviata, 
             <span style='color:green'>&#9632;</span> risposta inviata            
             </p>
         </div>
