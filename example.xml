@@ -2,18 +2,23 @@
 <exam 
     course='Nome di un bel corso'  
     name='Prova scritta di esempio'
-    date='28.4.2020'
-    time='00:01'
-    end_time='23:59'
-    duration_minutes='19'
+    duration_minutes='2'
     secret='shhht!' 
-    admins='pippo,pluto' 
+    admins='admin'
     storage_path='example-storage'
     auth_methods='ldap,fake'
 >
+    <instructions format='html'>
+    Questo è un esame di prova. Puoi inserire liberamente le risposte.
+    L'autenticazione accetta qualunque username e la password non viene controllata.
+    Se hai svolto l'esame con un certo username non lo potrai più ripetere.
+    Vedrai fissate le risposte che hai già dato.
+    Se usi 'admin' come username puoi vedere l'interfaccia di amministrazione.
+    Potrai vedere le risposte date da tutti (inserendo il corrispondente numero di matricola).
+    </instructions>
     <shuffle>
         <variants>
-            <exercise>
+            <exercise id="1.1">
                 Calcolare 
                 \[
                   \sum_{k=1}^{100} k
@@ -25,7 +30,7 @@
                     </answer>
                 </question>
             </exercise>
-            <exercise>
+            <exercise id="1.2">
                 Calcolare 
                 \[
                   \sum_{k=1}^{50} 2k
@@ -39,7 +44,7 @@
             </exercise>
         </variants>
         <variants>            
-            <exercise>
+            <exercise id="2.1">
                 Si consideri l'equazione
                 \[
                   x^2-2x+1 = 0
@@ -57,7 +62,7 @@
                     </answer>
                 </question>
             </exercise>
-            <exercise>
+            <exercise id="2.2">
                 Si consideri l'equazione
                 \[
                   x^2-1 = 0

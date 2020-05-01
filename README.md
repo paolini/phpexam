@@ -17,9 +17,7 @@ Il file di descrizione di un esame è un file XML. Il sistema è integrato con M
 
 # sviluppo in locale
 
-se non si ha ldap bisogna rimpiazzare authenticate() con fake_authenticate() nella 
-seconda riga della funzione serve(...). 
-Poi si può avviare un server in locale
+Si può avviare un server in locale
 
     cd webroot
     php -S localhost:8000
@@ -29,6 +27,7 @@ si potrà accedere all'indirizzo
     http://localhost:8000/?id=example
 
 dove `example` si riferisce al file `example.xml` che descrive l'esame.
+Se non si ha ldap bisogna aggiungere 'fake' ai metodi di autenticazione
 
 # messa in produzione
 
@@ -51,6 +50,22 @@ Al primo utilizzo il server crea la cartella per memorizzare i dati forniti
 dagli utenti. Bisognerà assicurarsi che l'utente utilizzato da apache (spesso www_data)
 abbia momentaneamente l'accesso in scrittura alla directory in cui vengono memorizzati i dati.
 
+# funzionalità
+
+E' possibile descrivere gli esercizi da somministrare tramite un file xml. Nel file vanno elencati 
+tutti gli esercizi e le domande. Di ogni esercizio è possibile scrivere delle varianti. Gli esercizi poi
+possono essere mescolati (anche a gruppi). Si può scriver in LaTeX.
+
+Si può indicare la data e l'ora di apertura e chiusura del compito. Agli studenti viene indicato il tempo 
+che manca all'apertura del compito (se non ancora iniziato) o al termine (se già iniziato). Si può indicare una 
+durata massima che viene calcolata dal momento di inizio effettivo per ogni singolo studente. Lo studente 
+può inviare le risposte durante tutto lo svolgimento, vengono memorizzate tutte con un timestamp. Se ricarica la pagina 
+lo studente vede le ultime risposte inviate (anche dopo il termine della prova). Dopo il termine della prova si può 
+decidere di mostrare le soluzioni del proprio compito.
+
+Gli utenti amministratori possono vedere tutte le varianti degli esercizi e le soluzioni. Possono anche visualizzare il testo
+e le risposte inserite da ogni singolo studente. Possono infine scaricare i dati in formato CSV.
+
 # creazione esami 
 
 si guardi il file `example.xml`. Terminologia:
@@ -59,6 +74,41 @@ si guardi il file `example.xml`. Terminologia:
 sull'esame.
 
 * *storage_path:* directory in cui vengono memorizzati i dati
+
+* *course:* nome del corso
+
+* *name:* nome della prova 
+
+* *date:* data nel formato gg.mm.aaaa
+
+* *time:* ora di inizio nel formato hh:mm
+
+* *duration_minutes:* durata della prova
+
+* *end_time:* ora in cui la prova viene chiusa
+
+* *secret:* chiave utilizzata per generare le varianti
+
+* *admins:* elenco delle matricole degli amministratori, separate da virgola
+
+* *storage_path:* directory in cui vengono creati i files con i dati raccolti
+
+* *auth_methods:* metodi di autenticazione tentati. Attualmente disponibili: ldap, fake.
+L'autenticazione ldap è attualmente quella dell'ateneo unipi. L'autenticazione fake 
+va usata solo per lo sviluppo in quanto accetta qualunque username e password.
+
+* *publish_solutions:* mostra immediatamente a tutti le soluzioni. Default: false
+
+* *publish_text:* mostra immediatamente a tutti il testo del compito. Default: false
+
+* *show_instructions:* mostra le istruzioni. Default: true
+
+* *show_legenda:* mostra la legenda. Default: true
+
+* *exam:* il nome della radice del file xml
+
+* *instructions:* testo da presentare su ogni compito. Mettere l'attributo `format=html`
+se è scritto in html
 
 * *shuffle:* gli elementi inclusi verranno mescolati tra loro
 
@@ -73,7 +123,8 @@ sull'esame.
 # possibili sviluppi futuri
 
 * domande a risposta multipla
+
 * correzione automatica
+
 * compatibilità con il formato moodle_xml
-* intervallo di apertura / chiusura dell'esame
-* tempo massimo di svolgimento
+
