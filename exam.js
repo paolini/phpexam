@@ -6,6 +6,36 @@ function clean_error() {
     $("#error").text("").hide();
 }
 
+/**
+ * sends a request to the specified url from a form. this will change the window location.
+ * @param {string} path the path to send the post request to
+ * @param {object} params the paramiters to add to the url
+ * @param {string} [method=post] the method to use on the form
+ */
+
+function post(path, params, method='post') {
+
+    // The rest of this code assumes you are not using a library.
+    // It can be made less wordy if you use one.
+    const form = document.createElement('form');
+    form.method = method;
+    form.action = path;
+  
+    for (const key in params) {
+      if (params.hasOwnProperty(key)) {
+        const hiddenField = document.createElement('input');
+        hiddenField.type = 'hidden';
+        hiddenField.name = key;
+        hiddenField.value = params[key];
+  
+        form.appendChild(hiddenField);
+      }
+    }
+  
+    document.body.appendChild(form);
+    form.submit();
+  }
+
 function load(action) {
     var post = {};
     post.user = $("#user").val();
@@ -96,7 +126,7 @@ function seconds_to_human_string(s) {
     s -= h*3600;
     var m = Math.floor(s / 60);
     s -= m*60;
-    if (h>0) msg += h.toString() + (h==1 ? " ora" : " ore" + (show_seconds?", ":" e "));
+    if (h>0) msg += h.toString() + (h==1 ? " ora" : " ore") + (show_seconds?", ":" e ");
     if (h>0 || m>0) msg += m.toString() + (m==1 ? " minuto" : " minuti");
     if (show_seconds) {
         if (m>0) msg += " e ";
@@ -119,7 +149,16 @@ function main(data) {
     $("#nome").text(data.user.nome);
     $("#matricola").text(data.user.matricola);
     $("#set_matricola").val(data.matricola);
-    if (data.user.is_admin) $("#admin").show();
+    if (data.user.is_admin) {
+        $("#admin").show();
+        $("#csv_download").click(function() {
+            post("", {
+                user: $("#user").val(),
+                password: $("#password").val(),
+                action: 'csv_download'            
+            },"POST");
+        });
+    }
 
     $("#text").show();
     var $exercises = $("#exercises");
@@ -137,8 +176,9 @@ function main(data) {
                 $exercises.append(""
                 + "<span class='left'><span class='check' id='check_" + question.form_id + "'>&#9632;</span> "
                 + "<i>" + question.statement + "</i></span>"
-                + "<span class='fill'><input class='fill' id='question_" + question.form_id + "' value='" + answer + "'></span>"
+                + "<span class='fill'><input class='fill' id='question_" + question.form_id + "'></span>"
                 + "<br />");
+                $("#question_" + question.form_id).val(answer);
                 if (question.solution) {
                     $exercises.append("<span style='color:red'>" + question.solution + "</span><br />\n");
                 }
@@ -190,7 +230,7 @@ function main(data) {
                 $exercises.append("<p>Durata della prova " + seconds_to_human_string(data.duration_minutes*60) + ".</p>");
             }
             if (data.end_time) {
-                $exercises.append("<p>Comunque entro le ore " + data.end_time + ".</p>");
+                $exercises.append("<!-- p>Da completare comunque entro le ore " + data.end_time + ".</p-->");
             }
         }
         if (data.is_open) {

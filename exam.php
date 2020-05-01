@@ -1,5 +1,20 @@
 <?php
 
+date_default_timezone_set('Europe/Rome');
+
+function myErrorHandler($errno, $errstr, $errfile, $errline)
+{
+    $fp = fopen(__DIR__ . '/var/phpexam.log', 'at');
+    if ($fp !== null) {
+        fwrite($fp, "$errno $errstr $errfile $errline\n");
+        fclose($fp);
+    }
+    return False;
+}
+
+// set to the user defined error handler
+$old_error_handler = set_error_handler("myErrorHandler");
+
 function array_get($array, $key, $default=null) {
     if (isset($array[$key])) return $array[$key];
     return $default;
@@ -194,8 +209,10 @@ if (false) {
 }
 
 function recurse_push(&$lst, $lst_or_item, $type) {
-    if ($lst === null) throw("ghufd");
-    if (isset($lst_or_item['type']) && $lst_or_item['type'] === $type) {
+    if ($lst === null) throw("internal error #4483");
+    if ($lst_or_item === null) {
+        // discard
+    } else if (isset($lst_or_item['type']) && $lst_or_item['type'] === $type) {
         array_push($lst, $lst_or_item);
     } else if (is_array($lst_or_item)){
         foreach($lst_or_item as $item) {
@@ -220,7 +237,7 @@ function my_explode($separator, $string) {
 function my_timestamp($date, $time) {
     if ($date === null || $time === null) return null;
     try {
-        error_log("my_timestamp ".json_encode($date). " ". json_encode( $time));
+        // error_log("my_timestamp ".json_encode($date). " ". json_encode( $time));
         return DateTime::createFromFormat("j.n.Y H:i", $date . ' ' . $time)->getTimestamp();
     } catch (Exception $e) {
         error_log("invalid date/ time $date $time\n");
@@ -230,6 +247,16 @@ function my_timestamp($date, $time) {
 
 function my_xml_get($xml, $key, $default=null) {
     if (isset($xml[$key])) return (string) $xml[$key];
+    return $default;
+}
+
+function my_xml_get_bool($xml, $key, $default=null) {
+    if (isset($xml[$key])) {
+        $val = (string) $xml[$key];
+        if ($val === '1' || strtolower($val) === 'true') return True;
+        if ($val === '0' || strtolower($val) === 'false') return False;
+        throw new ParseError("Not a valid boolean value $val for key $key");
+    };
     return $default;
 }
 
@@ -258,6 +285,11 @@ class Exam {
         $this->time = my_xml_get($root, 'time');
         $this->end_time = my_xml_get($root, 'end_time');
         $this->duration_minutes = (int) my_xml_get($root, 'duration_minutes');
+        $this->show_solutions = my_xml_get_bool($root, 'publish_solutions', False);
+        $this->show_variants = False;
+        $this->publish_text = my_xml_get_bool($root, "publish_text", False);
+        $this->show_instructions = my_xml_get_bool($root, "show_instructions", True);
+        $this->show_legenda = my_xml_get_bool($root, "show_legenda", True);
 
         $this->timestamp = my_timestamp($this->date, $this->time);
         $this->end_timestamp = my_timestamp($this->date, $this->end_time);
@@ -268,6 +300,7 @@ class Exam {
             $this->storage_path = __DIR__ . '/' . $this->storage_path;
         }
         if (!is_dir($this->storage_path)) {
+            // todo: controllare se da' errore!
             mkdir($this->storage_path, 0777, True);
         }
         
@@ -279,13 +312,29 @@ class Exam {
             $this->is_open = False;
             $this->seconds_to_start = $this->timestamp - $this->now;
         } 
-        error_log("END_TIMESTAMP {$this->end_timestamp} {$this->now}");
+        // error_log("END_TIMESTAMP {$this->end_timestamp} {$this->now}");
         if ($this->end_timestamp && $this->now > $this->end_timestamp) {
             $this->is_open = False;
         }
-        error_log("IS OPEN {$this->is_open}");
+        // error_log("IS OPEN {$this->is_open}");
+
+        $this->IP = getenv('HTTP_CLIENT_IP')?:
+            getenv('HTTP_X_FORWARDED_FOR')?:
+            getenv('HTTP_X_FORWARDED')?:
+            getenv('HTTP_FORWARDED_FOR')?:
+            getenv('HTTP_FORWARDED')?:
+            getenv('REMOTE_ADDR');
+        $this->http_user_agent = array_get($_SERVER, 'HTTP_USER_AGENT');
+
+        foreach ($root as $child) {
+            if ($child->getName() === 'instructions') {
+                $this->instructions = (string) $child;
+                if (my_xml_get($child, 'format') === 'html') $this->instructions_html = $this->instructions;
+                else $this->instructions_html = htmlspecialchars($this->instructions);
+            }
+        }            
     }
-    
+
     function is_admin($matricola) {
         return in_array($matricola, $this->admins);
     }
@@ -294,7 +343,8 @@ class Exam {
         $this->start_timestamp = $this->now;
     }
 
-    function compose_for($matricola, $options=[]) {
+    function compose_for($matricola) {
+
         $this->matricola = $matricola;
         $this->storage_filename = $this->storage_path . "/" . $matricola . ".jsons";
 
@@ -308,6 +358,7 @@ class Exam {
                 if ($this->timestamp !== null && $this->timestamp > $this->start_timestamp) {
                     /*
                     * se l'ultimo start e' anteriore alla data di inizio il compito e' stato riproposto
+                    * e possiamo iniziare nuovamente
                     */
                     $this->start_timestamp = null;
                 }
@@ -339,11 +390,11 @@ class Exam {
             }
         }
 
-        $this->options = $options;
         $this->rand = new MyRand($this->secret . '_' . $this->matricola);
         $this->answers = [];
         $this->exercise_count = 0;
         $this->variant_count = 0;
+        $this->exercise_id = null;
         $this->text = $this->recurse_parse($this->xml_root);
     }
 
@@ -362,7 +413,7 @@ class Exam {
         if ($name === 'shuffle') {
             $lst = [];
             $children = $xml->children();
-            if (array_get($this->options, 'variants')) { // don't shuffle
+            if ($this->show_variants) { // don't shuffle
                 // nop
             } else {
                 $children = $this->rand->shuffled($children);
@@ -373,7 +424,7 @@ class Exam {
             return $lst;
         }
         if ($name === 'variants') {
-            if (array_get($this->options, 'variants')) { // show all variants
+            if ($this->show_variants) { // show all variants
                 $lst = [];
                 $fix_count = $this->exercise_count;
                 foreach($xml->children() as $child) {
@@ -389,6 +440,7 @@ class Exam {
             return $this->recurse_parse($xml->children()[$n]);
         }
         if ($name === 'exercise') {
+            $this->exercise_id = my_xml_get($xml, 'id');
             $obj = ['type' => $name];
             $this->exercise_count ++;
             $obj['number'] = "{$this->exercise_count}";
@@ -412,11 +464,12 @@ class Exam {
             $answer = [];
             $id = (string) $xml['id'];
             $answer['id'] = $id;
+            $answer['exercise_id'] = $this->exercise_id;
             $answer['form_id'] = $form_id;
             foreach($xml->children() as $child) {
                 if ($child->getName() === 'answer') {
                     $answer['solution'] = trim((string) $child);
-                    if (array_get($this->options,'solutions')) { // show solutions
+                    if ($this->show_solutions) {
                         $obj['solution'] = trim((string) $child);
                     }
                 }
@@ -424,6 +477,7 @@ class Exam {
             array_push($this->answers, $answer);
             return $obj;
         }
+        if ($name === 'instructions') return null;
         throw new ExamError("elemento XML inatteso <$name>");
     }
 
@@ -435,6 +489,8 @@ class Exam {
         $timestamp = date(DATE_ATOM);
         fwrite($fp, json_encode([
             'timestamp' => $timestamp,
+            'IP' => $this->IP,
+            'http_user_agent' => $this->http_user_agent,
             'user' => $user,
             $action => $object
             ]) . "\n");
@@ -465,6 +521,51 @@ class Exam {
         if ($found !== null) $found['timestamp'] = DateTime::createFromFormat(DateTime::ATOM,$found['timestamp'])->getTimestamp();
         return $found;
         }
+
+    function csv_response($fp_handle) {
+        $dir = new DirectoryIterator($this->storage_path);
+        foreach ($dir as $fileinfo) {
+            $filename = $fileinfo->getFilename();
+            $pathinfo = pathinfo($filename);
+            if ($pathinfo['extension'] === 'jsons') {
+                $matricola = $pathinfo['filename'];
+                $this->compose_for($matricola);
+                $fp = fopen($this->storage_filename, "rt");
+                if ($fp === False) throw new Exception('Cannot read file ' . $filename);
+                while(True) {
+                    $line = fgets($fp);
+                    if ($line === False) break; // EOF
+                    $line = trim($line);
+                    if ($line === '') continue;
+                    $obj = json_decode($line, True);
+                    if (isset($obj['submit']) || isset($obj['start'])) {
+                        // error_log("object " . json_encode($obj));
+                        $row = [
+                            $obj['timestamp'],
+                            $obj['user']['matricola'],
+                            $obj['user']['cognome'],
+                            $obj['user']['nome']
+                        ];
+                        if (isset($obj['submit'])) {
+                            array_push($row,'submit');
+                            $submit = $obj['submit'];
+                            if (count($submit) !== count($this->answers)) throw new Exception("data mismatch");
+                            for ($i=0; $i < count($submit) ; $i ++) {
+                                $submit[$i]['exercise_id'] = $this->answers[$i]['exercise_id'];
+                            }
+                            usort($submit, function($a, $b){ return $a['id'] < $b['id']?-1:1;});
+                            foreach($submit as $ans) {
+                                array_push($row, $ans['exercise_id'], $ans['id'], $ans['answer']);
+                            }
+                        } else {
+                            array_push($row,'start');
+                        }
+                        fputcsv($fp_handle, $row);
+                    }
+                }
+            }
+        }
+    }
 }
 
 function get_compito($exam, $user) {
@@ -479,10 +580,11 @@ function get_compito($exam, $user) {
     $response['is_open'] = $exam->is_open;
     $response['ok'] = True;
 
-    if ($exam->start_timestamp !== null || array_get($user, 'is_admin')) {
+    if ($exam->start_timestamp !== null || array_get($user, 'is_admin') || $exam->publish_text) {
         // lo studente ha iniziato (e forse anche finito) l'esame
         // oppure siamo admin
         // in tal caso possiamo mostrare il compito
+        // oppure è stato dichiarato un testo pubblico
 
         $exam->write($user, "compito", [
             'text' => $exam->text,
@@ -576,11 +678,9 @@ function serve($exam) {
             $matricola = $user['matricola'];
             if ($user['is_admin']) {
                 $matricola = array_get($_POST, 'matricola', $matricola);
-                $options = [
-                    'solutions' => (array_get($_POST, 'solutions') === 'true'),
-                    'variants' => (array_get($_POST, 'variants') === 'true')
-                ];
-                $exam->compose_for($matricola, $options);            
+                if (array_get($_POST, 'solutions') === 'true') $exam->show_solutions = True;
+                if (array_Get($_POST, 'variants') === 'true') $exam->show_variants = True;
+                $exam->compose_for($matricola);  
             } else {
                 // non admins cannot inspect variations
                 $exam->compose_for($matricola);
@@ -606,9 +706,27 @@ function serve($exam) {
     }
 }
 
-// EXECUTION STARTS HERE
+function request_path()
+{
+    $request_uri = explode('/', trim($_SERVER['REQUEST_URI'], '/'));
+    $script_name = explode('/', trim($_SERVER['SCRIPT_NAME'], '/'));
+    $parts = array_diff_assoc($request_uri, $script_name);
+    if (empty($parts))
+    {
+        return '/';
+    }
+    $path = implode('/', $parts);
+    if (($position = strpos($path, '?')) !== FALSE)
+    {
+        $path = substr($path, 0, $position);
+    }
+    return $path;
+}
 
+// EXECUTION STARTS HERE
 $exam_id = array_get($_GET,'id');
+
+if ($exam_id === null) $exam_id = request_path();
 
 if (!preg_match('/^[A-Za-z0-9\-]+$/', $exam_id)) {
     header('HTTP/1.1 404 Not Found');
@@ -636,6 +754,14 @@ try {
 
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
 <?php
+if (array_get($_POST,'action') === 'csv_download') {
+    header('Content-Type: text/csv');
+    header('Content-Disposition: attachment; filename="'.$exam_id.'.csv";');
+    $fp = fopen('php://output', 'w');
+    $exam->csv_response($fp);
+    fclose($fp);
+    exit();
+}
 header('Content-Type: application/json');
 echo json_encode(serve($exam));
 ?>
@@ -672,6 +798,12 @@ span.left {
       <h2><?php echo("{$exam->course}"); ?></h2>
       <h3><?php echo("{$exam->name}"); ?></h3>
       <h3><?php echo("{$exam->date}"); if ($exam->time) echo(" ore {$exam->time}"); ?></h3>
+      <!--pre>
+      <?php echo $exam->timestamp; ?>
+      <?php echo $exam->end_timestamp; ?>
+      <?php echo $exam->now; ?>
+      <?php echo $exam->duration_minutes ?>
+      </pre-->
     <h3 id="error" style="color:red" hidden></h3>
     <div id="auth">
         <table style="display:inline-block;">
@@ -699,33 +831,18 @@ span.left {
             mostra soluzioni: <input id="show_solutions" type="checkbox" checked><br />
             mostra varianti:  <input id="show_variants" type="checkbox" checked><br />
             cambia matricola: <input id="set_matricola" disabled><br />
+            <button id="csv_download">download csv</button><br />
         </div>
-        <div>
-            Si suggerisce di usare notazioni semplici ma chiare per scrivere le formule nelle caselle di risposta
-            (non scrivere in \(\LaTeX\)).
-            Ad esempio per descrivere la formula \(\frac{\sqrt{\frac 3 4 \pi+1}}{\sqrt[3]{c_1} + x^{2+e}}\)
-            si scriva: 
-            <pre>
-                sqrt(3/4*pi + 1) / (sqrt^3(c_1) + x^(2+e))
-            </pre>
-            Per scrivere \(\alpha, +\infty, \mathbb R, \forall, \exists, &lt;, &gt;, \ge, \le\) si scriva:
-            <pre>
-                alfa, +oo, R, per ogni, esiste, &lt;, &gt;, >=, <=
-            </pre>
-        </div>
-        <div>
-            <p>
-                Si compilino le caselle con le risposte e si prema il pulsante di invio man mano che vengono risolti (o modificati) gli esercizi.
-                I tempi di risposta devono coincidere con i tempi utilizzati per lo svolgimento.
-                Allo scadere del tempo verrà considerata l'ultima versione inviata. 
-                Nei 15 minuti dopo lo scadere del tempo si dovrà inviare copia degli appunti dove risultino tutti i passaggi svolti.
-            </p>
+        <?php if ($exam->show_instructions) echo "<div id='instructions'>" . $exam->instructions_html . "</div>" ?>
+        <?php if ($exam->show_legenda): ?>
+        <div id="legenda">
             <p><b>legenda:</b>
             <span style='color:black'>&#9632;</span> risposta non data,
             <span style='color:red'>&#9632;</span> risposta non inviata, 
             <span style='color:green'>&#9632;</span> risposta inviata            
             </p>
         </div>
+        <?php endif; ?>
         <div>            
             <div id="timer"></div>
             <button id="submit" hidden>invia risposte</button>
