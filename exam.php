@@ -195,19 +195,6 @@ class MyRand {
     }
 }
 
-
-if (false) {
-    // test random numbers:
-    foreach(["ciccio", "pippo", "pluto", "gigio", "luca", "mario", "giovanni"] as $seed) {
-        $rand = new MyRand($seed);
-        echo("seed $seed {$rand->random(2)}\n");
-        foreach([1,2,3,4,5] as $i) {
-            echo("{$rand->random(10)}\n");
-        }
-    }
-    die();
-}
-
 function recurse_push(&$lst, $lst_or_item, $type) {
     if ($lst === null) throw("internal error #4483");
     if ($lst_or_item === null) {
@@ -531,7 +518,7 @@ class Exam {
                 $matricola = $pathinfo['filename'];
                 $this->compose_for($matricola);
                 $fp = fopen($this->storage_filename, "rt");
-                if ($fp === False) throw new Exception('Cannot read file ' . $filename);
+                if ($fp === False) throw new Exception('Cannot read file ' . $this->storage_filename);
                 while(True) {
                     $line = fgets($fp);
                     if ($line === False) break; // EOF
@@ -566,6 +553,35 @@ class Exam {
             }
         }
     }
+
+    function get_student_list() {
+        $list = [];
+        $dir = new DirectoryIterator($this->storage_path);
+        foreach ($dir as $fileinfo) {
+            $filename = $fileinfo->getFilename();
+            $pathinfo = pathinfo($filename);
+            if ($pathinfo['extension'] === 'jsons') {
+                $matricola = $pathinfo['filename'];
+                $filename = $this->storage_path . '/' . $filename;
+                $fp = fopen($filename, "rt");
+                if ($fp === False) throw new Exception('Cannot read file ' . $filename);
+                while(True) {
+                    $line = fgets($fp);
+                    if ($line === False) break; // EOF
+                    $line = trim($line);
+                    if ($line === '') continue;
+                    $obj = json_decode($line, True);
+                    $user = array_get($obj, 'user');
+                    if ($user !== null) {
+                        array_push($list, $user);
+                        break;
+                    }
+                }
+                fclose($fp);
+            }
+        }
+        return $list;
+    }
 }
 
 function get_compito($exam, $user) {
@@ -592,12 +608,18 @@ function get_compito($exam, $user) {
             ]);
         $response['text'] = $exam->text;
         $response['seconds_to_finish'] = $exam->seconds_to_finish;
+        $response['matricola'] = $exam->matricola;
 
         $answers = [];
         $obj = $exam->read('submit', False);
         if ($obj !== null) {
             foreach($obj['submit'] as $item) {
                 $answers[$item['form_id']] = $item['answer'];
+            }
+            $user = array_get($obj, 'user');
+            if ($user !== null) {
+                $response['cognome'] = array_get($user, 'cognome');
+                $response['nome'] = array_get($user, 'nome');
             }
         }
         if (count($answers) === 0) {
@@ -656,61 +678,25 @@ function submit($exam, $user) {
     return $response;
 }
 
-function error_response($error_message) {
-    return ['ok' => False, 'error' => $error_message];
-}
-
-function serve($exam) {
-    try {
-        foreach($exam->auth_methods as $auth) {
-            error_log("trying " . $auth);
-            if ($auth === 'ldap') $user = authenticate();
-            else if ($auth === 'fake') $user = fake_authenticate();
-            if ($user['authenticated']) break;
-        }
-        if (!$user['authenticated']) return error_response("utente non riconosciuto");   
-        
-        $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
-
-        $action = array_get($_POST, 'action');
-        
-        if ($action === 'reload' || $action === 'login') {
-            $matricola = $user['matricola'];
-            if ($user['is_admin']) {
-                $matricola = array_get($_POST, 'matricola', $matricola);
-                if (array_get($_POST, 'solutions') === 'true') $exam->show_solutions = True;
-                if (array_Get($_POST, 'variants') === 'true') $exam->show_variants = True;
-                $exam->compose_for($matricola);  
-            } else {
-                // non admins cannot inspect variations
-                $exam->compose_for($matricola);
-            }
-            return get_compito($exam, $user);
-        }
-        
-        if ($action === 'start') {
-            $matricola = $user['matricola'];
-            $exam->start();
-            $exam->compose_for($matricola);
-            $exam->write($user, 'start', True); /* segnamo l'inizio del compito */
-            return get_compito($exam, $user);
-        }
-        
-        if ($action === 'submit') {
-            return submit($exam, $user);
-        }
-
-        return error_response("richiesta non valida");
-    } catch (ExamError $e) {
-        return error_response("$e");
+function get_user($exam) {
+    $user = null;
+    foreach($exam->auth_methods as $auth) {
+        // error_log("trying " . $auth);
+        if ($auth === 'ldap') $user = authenticate();
+        else if ($auth === 'fake') $user = fake_authenticate();
+        if ($user['authenticated']) {
+            $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
+            return $user;
+        };
     }
+    return null;
 }
 
 function request_path()
 {
     $request_uri = explode('/', trim($_SERVER['REQUEST_URI'], '/'));
     $script_name = explode('/', trim($_SERVER['SCRIPT_NAME'], '/'));
-    $parts = array_diff_assoc($request_uri, $script_name);
+    $parts = array_diff_assoc($requestc_uri, $script_name);
     if (empty($parts))
     {
         return '/';
@@ -721,6 +707,14 @@ function request_path()
         $path = substr($path, 0, $position);
     }
     return $path;
+}
+
+// errors depending on the contents of the XML file
+// we should report to the user
+class ResponseError extends Exception {
+    public function __toString() {
+        return "{$this->message}";
+    }
 }
 
 // EXECUTION STARTS HERE
@@ -754,16 +748,62 @@ try {
 
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
 <?php
-if (array_get($_POST,'action') === 'csv_download') {
-    header('Content-Type: text/csv');
-    header('Content-Disposition: attachment; filename="'.$exam_id.'.csv";');
-    $fp = fopen('php://output', 'w');
-    $exam->csv_response($fp);
-    fclose($fp);
-    exit();
+
+try {
+    try {
+        $action = array_get($_POST,'action');
+        $user = get_user($exam);
+        if ($user === null) throw new ResponseError("user not authenticated");
+        $response = null;
+        error_log("ACTION: $action");
+        if ($action === 'csv_download') {
+            if (!$user['is_admin']) throw new ResponseError("user not authorized");
+            header('Content-Type: text/csv');
+            header('Content-Disposition: attachment; filename="'.$exam_id.'.csv";');
+            $fp = fopen('php://output', 'w');
+            $exam->csv_response($fp);
+            fclose($fp);
+        } else if ($action === 'reload' || $action === 'login') {
+            $matricola = $user['matricola'];
+            if ($user['is_admin']) {
+                $matricola = array_get($_POST, 'matricola', '');
+                if (array_get($_POST, 'solutions') === 'true') $exam->show_solutions = True;
+                if (array_get($_POST, 'variants') === 'true') $exam->show_variants = True;
+                $exam->compose_for($matricola);  
+            } else {
+                // non admins cannot inspect variations
+                $exam->compose_for($matricola);
+            }
+            $response = get_compito($exam, $user);
+        } else if ($action === 'start') {
+            $matricola = $user['matricola'];
+            $exam->start();
+            $exam->compose_for($matricola);
+            $exam->write($user, 'start', True); /* segnamo l'inizio del compito */
+            $response = get_compito($exam, $user);
+        } else if ($action === 'submit') {
+            $response = submit($exam, $user);
+        } else if ($action === 'get_students') {
+            $response = [
+                'ok' => True,
+                'students' => $exam->get_student_list()
+            ];
+            error_log("GET_STUDENTS $response");
+        } else {
+            throw new ResponseError("richiesta non valida");
+        }
+        if ($response !== null) {
+            header('Content-Type: application/json');
+            echo json_encode($response);
+        }
+    } catch (ExamError $e) {
+        throw new ResponseError("$e");
+    }
+} catch (ResponseError $e) {
+    error_log("response_Error");
+    header('Content-Type: application/json');
+    echo json_encode(['ok' => False, 'error' => "$e"]);
 }
-header('Content-Type: application/json');
-echo json_encode(serve($exam));
 ?>
 
 <?php else: ?>
@@ -824,13 +864,12 @@ span.left {
         <div id="user_div">
             <b>Cognome:</b> <span id="cognome"></span> <br />
             <b>Nome:</b> <span id="nome"></span> <br />
-            <b>Matricola:</b> <span id="matricola"></span> <br />
+            <b>Matricola:</b> <span id="matricola"></span><br />
         </div>
         <div id="admin" hidden>
             <b>riservato agli amministratori:</b><br/>
             mostra soluzioni: <input id="show_solutions" type="checkbox" checked><br />
-            mostra varianti:  <input id="show_variants" type="checkbox" checked><br />
-            cambia matricola: <input id="set_matricola" disabled><br />
+            scegli matricola: <input id="set_matricola">  <select id="select_student"></select> <br />
             <button id="csv_download">download csv</button><br />
         </div>
         <?php if ($exam->show_instructions) echo "<div id='instructions'>" . $exam->instructions_html . "</div>" ?>

@@ -42,9 +42,13 @@ function load(action) {
     post.password = $("#password").val();
     post.action = action;
     post.solutions = $("#show_solutions").prop('checked');
-    post.variants = $("#show_variants").prop('checked');
-    if (!post.variants) post.matricola = $("#set_matricola").val();
-    $("#set_matricola").prop('disabled', post.variants);
+    var matricola = $("#set_matricola").val();
+    if (matricola != '') {
+        post.variants = false;
+        post.matricola = matricola;
+    } else {
+        post.variants = true;
+    }
     clean_error();
     $.post("", post, function(data, status) {
         if (!data.ok) {
@@ -145,9 +149,9 @@ function stop_timer() {
 function main(data) {
     stop_timer();
 
-    $("#cognome").text(data.user.cognome);
-    $("#nome").text(data.user.nome);
-    $("#matricola").text(data.user.matricola);
+    $("#cognome").text(data.cognome || data.user.cognome);
+    $("#nome").text(data.nome || data.user.nome);
+    $("#matricola").text(data.matricola || data.user.matricola);
     $("#set_matricola").val(data.matricola);
     if (data.user.is_admin) {
         $("#admin").show();
@@ -158,6 +162,32 @@ function main(data) {
                 action: 'csv_download'            
             },"POST");
         });
+        $.post("", {
+                user: $("#user").val(),
+                password: $("#password").val(),
+                action: 'get_students'}, 
+                function(response, status) {
+                    $select = $('#select_student');
+                    var count = 0;
+                    if (response.ok) {
+                        $select.append('<option value="">-- mostra tutte le varianti --</option>');
+                        response.students.forEach(function(student) {
+                            $select.append('<option value="' + student.matricola + ' ">' + student.cognome + ' ' + student.nome + '</option>');
+                            count ++;
+                        });
+                    } else {
+                        console.log(response.error);
+                    }
+                    if (count > 0) {
+                        $select.show();
+                        $select.change(function() {
+                            var val = $select.val();
+                            $('#set_matricola').val(val).change();
+                        })
+                    } else {
+                        $select.hide();
+                    }            
+                });
     }
 
     $("#text").show();
