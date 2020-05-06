@@ -155,13 +155,6 @@ function main(data) {
     $("#set_matricola").val(data.matricola);
     if (data.user.is_admin) {
         $("#admin").show();
-        $("#csv_download").click(function() {
-            post("", {
-                user: $("#user").val(),
-                password: $("#password").val(),
-                action: 'csv_download'            
-            },"POST");
-        });
         $.post("", {
                 user: $("#user").val(),
                 password: $("#password").val(),
@@ -170,9 +163,10 @@ function main(data) {
                     $select = $('#select_student');
                     var count = 0;
                     if (response.ok) {
+                        $select.empty();
                         $select.append('<option value="">-- mostra tutte le varianti --</option>');
                         response.students.forEach(function(student) {
-                            $select.append('<option value="' + student.matricola + ' ">' + student.cognome + ' ' + student.nome + '</option>');
+                            $select.append('<option value="' + student.matricola + '">' + student.cognome + ' ' + student.nome + '</option>');
                             count ++;
                         });
                     } else {
@@ -183,7 +177,7 @@ function main(data) {
                         $select.change(function() {
                             var val = $select.val();
                             $('#set_matricola').val(val).change();
-                        })
+                        });
                     } else {
                         $select.hide();
                     }            
@@ -222,11 +216,9 @@ function main(data) {
             $exercises.append("<br /><br />");
         });
         MathJax.Hub.Queue(["Typeset",MathJax.Hub]);
-        $("#submit").show().click(function(){submit(data)});
+        $("#submit").show().off('click').click(function(){submit(data)});
         if (data.matricola != data.user.matricola) $("#submit").hide(); // evita di inviare dati di un utente impersonificato
-        $("#set_matricola").val(data.matricola).change(function(){load('reload')});
-        $("#show_solutions").change(function(){load('reload')});
-        $("#show_variants").change(function(){load('reload')});
+        $("#set_matricola").val(data.matricola);
 
         $("#timer").empty();
         if (data.seconds_to_finish !== null) {
@@ -287,4 +279,14 @@ function main(data) {
 
 $(function(){
     $("#login").click(function() {load('login');});
+    $("#set_matricola").change(function(){load('reload')});
+    $("#show_solutions").change(function(){load('reload')});
+    $("#show_variants").change(function(){load('reload')});
+    $("#csv_download").click(function() {
+        post("", {
+            user: $("#user").val(),
+            password: $("#password").val(),
+            action: 'csv_download'            
+        },"POST");
+    });
 })
