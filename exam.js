@@ -149,9 +149,14 @@ function stop_timer() {
 function main(data) {
     stop_timer();
 
-    $("#cognome").text(data.cognome || data.user.cognome);
-    $("#nome").text(data.nome || data.user.nome);
-    $("#matricola").text(data.matricola || data.user.matricola);
+    $("#cognome").text(data.cognome);
+    $("#nome").text(data.nome);
+    $("#matricola").text(data.matricola);
+    if (data.instructions_html != null) {
+        $("#instructions").html(data.instructions_html).show();
+    } else {
+        $("#instructions").hide();
+    }
     $("#set_matricola").val(data.matricola);
     if (data.user.is_admin) {
         $("#admin").show();
@@ -198,10 +203,10 @@ function main(data) {
                     answer = data.answers[question.form_id];
                 }
                 $exercises.append(""
-                + "<span class='left'><span class='check' id='check_" + question.form_id + "'>&#9632;</span> "
-                + "<i>" + question.statement + "</i></span>"
+                + "<p class='left'><span class='check' id='check_" + question.form_id + "'>&#9632;</span> "
+                + "<i>" + question.statement + "</i>"
                 + "<span class='fill'><input class='fill' id='question_" + question.form_id + "'></span>"
-                + "<br />");
+                + "</p>");
                 $("#question_" + question.form_id).val(answer);
                 if (question.solution) {
                     $exercises.append("<span style='color:red'>" + question.solution + "</span><br />\n");

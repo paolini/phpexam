@@ -20,6 +20,10 @@ function array_get($array, $key, $default=null) {
     return $default;
 }
 
+// Terrible hack because the SSL certificate on the Unipi side is not
+// validated by a publicy available CA.
+putenv("LDAPTLS_REQCERT=never");
+
 function authenticate() {
     $ldapHost = "ldaps://idm2.unipi.it";
     $ldapPort = "636";	// (default 389)
@@ -247,6 +251,13 @@ function my_xml_get_bool($xml, $key, $default=null) {
     return $default;
 }
 
+function interpolate($template, $environment) {
+    foreach($environment as $key => $val) {
+        $template = str_replace('{{ student[\'' . $key . '\'] }}', $val, $template);
+    }
+    return $template;
+}
+
 class Exam {
     function __construct($xml_filename, $exam_id) {
         $this->exam_id = $exam_id;
@@ -290,6 +301,17 @@ class Exam {
             // todo: controllare se da' errore!
             mkdir($this->storage_path, 0777, True);
         }
+
+        $this->students = null;
+        $students_csv_filename = my_xml_get($root, 'students_csv');
+        if ($students_csv_filename !== null) {
+            if (substr($students_csv_filename, 0, 1) !== '/') {
+                $students_csv_filename = __DIR__ . '/' . $students_csv_filename;
+            }
+            $this->load_students_csv($students_csv_filename);
+        }
+
+        $this->instructions_html = null;
         
         $this->now = time();
         $this->is_open = True;
@@ -312,14 +334,37 @@ class Exam {
             getenv('HTTP_FORWARDED')?:
             getenv('REMOTE_ADDR');
         $this->http_user_agent = array_get($_SERVER, 'HTTP_USER_AGENT');
+    }
 
-        foreach ($root as $child) {
-            if ($child->getName() === 'instructions') {
-                $this->instructions = (string) $child;
-                if (my_xml_get($child, 'format') === 'html') $this->instructions_html = $this->instructions;
-                else $this->instructions_html = htmlspecialchars($this->instructions);
+    function load_students_csv($csv_filename) {
+        $h = fopen($csv_filename, "r");
+        if ($h === False) {
+            throw new ParseError("Impossibile aprire il file $csv_filename");
+        }
+        $headers = null;
+        $students = [];
+        $ident_column = null;
+        while (($line = fgetcsv($h)) !== FALSE) {
+            if ($line === [ null ]) continue;
+            if ($headers === null) {
+                $headers = $line;
+                for ($i=0; $i<count($headers); $i++) {
+                    if (strtolower($headers[$i]) == 'matricola') {
+                        $ident_column = $i;
+                    break;
+                    }
+                }
+                if ($ident_column === null) throw new ParseError("Mi aspetto 'matricola' come intestazione di una colonna");
+                continue;
             }
-        }            
+            $student = [];
+            for($i=0;$i < count($headers); $i++) {
+                $student[$headers[$i]] = $line[$i];
+            }
+            $students[$line[$ident_column]] = $student;
+        }
+        fclose($h);
+        $this->students = $students;
     }
 
     function is_admin($matricola) {
@@ -334,6 +379,25 @@ class Exam {
 
         $this->matricola = $matricola;
         $this->storage_filename = $this->storage_path . "/" . $matricola . ".jsons";
+        $this->student = null;
+        if ($this->students !== null) {
+            $this->student = array_get($this->students, $this->matricola);
+        }
+
+        $root = $this->xml_root;
+        $this->instructions = null;
+        $this->instructions_html = null;
+        foreach ($root as $child) {
+            if ($child->getName() === 'instructions' && $this->show_instructions) {
+                $this->instructions = (string) $child;
+                if ($this->student !== null) {
+                    $this->instructions = interpolate($this->instructions, $this->student);
+                }
+                if (my_xml_get($child, 'format') === 'html') $this->instructions_html = $this->instructions;
+                else $this->instructions_html = htmlspecialchars($this->instructions);
+            }
+        }    
+        error_log("ISTRUZIONI " . $this->instructions_html);        
 
         if ($this->start_timestamp === null) {
             // bisogna controllare se il compito e' gia' partito
@@ -498,7 +562,6 @@ class Exam {
             $line = trim($line);
             if ($line === "") continue;
             $obj = json_decode($line, True);
-            // error_log(">>line: " . json_encode($obj) . "\n");
             if (isset($obj[$action])) {
                 $found = $obj;
                 if ($first) break; // find first line 
@@ -571,6 +634,7 @@ class Exam {
                     $line = trim($line);
                     if ($line === '') continue;
                     $obj = json_decode($line, True);
+                    if (!isset($obj['submit'])) continue;
                     $user = array_get($obj, 'user');
                     if ($user !== null) {
                         array_push($list, $user);
@@ -580,6 +644,9 @@ class Exam {
                 fclose($fp);
             }
         }
+        usort($list, function($a, $b) {
+            return $a['cognome']<$b['cognome']?-1:($a['cognome']>$b['cognome']?1:($a['nome']<$b['nome']?-1:1));
+        });
         return $list;
     }
 }
@@ -595,17 +662,20 @@ function get_compito($exam, $user) {
     $response['seconds_to_start'] = $exam->seconds_to_start;
     $response['is_open'] = $exam->is_open;
     $response['ok'] = True;
+    $response['instructions_html'] = $exam->instructions_html;  
 
     if ($exam->start_timestamp !== null || array_get($user, 'is_admin') || $exam->publish_text) {
         // lo studente ha iniziato (e forse anche finito) l'esame
         // oppure siamo admin
         // in tal caso possiamo mostrare il compito
         // oppure è stato dichiarato un testo pubblico
-
-        $exam->write($user, "compito", [
-            'text' => $exam->text,
-            'answers' => $exam->answers
-            ]);
+        if ($exam->is_open && !array_get($user, 'is_admin')) {
+            // logga gli accessi durante il compito
+            $exam->write($user, "compito", [
+                'text' => $exam->text,
+                'answers' => $exam->answers
+                ]);
+            }
         $response['text'] = $exam->text;
         $response['seconds_to_finish'] = $exam->seconds_to_finish;
         $response['matricola'] = $exam->matricola;
@@ -664,7 +734,6 @@ function submit($exam, $user) {
         $key = 'answer_' . $answer['form_id'];
         $val = array_get($_POST, $key);
         if ($val === null) {
-            error_log(json_encode($_POST));
             $response['message'] = 'richiesta non valida';
             return $response;
         }
@@ -696,7 +765,7 @@ function request_path()
 {
     $request_uri = explode('/', trim($_SERVER['REQUEST_URI'], '/'));
     $script_name = explode('/', trim($_SERVER['SCRIPT_NAME'], '/'));
-    $parts = array_diff_assoc($requestc_uri, $script_name);
+    $parts = array_diff_assoc($request_uri, $script_name);
     if (empty($parts))
     {
         return '/';
@@ -733,7 +802,7 @@ if (!file_exists($exam_filename)) {
     error_log("Cannot open file $exam_filename\n");
     header('HTTP/1.1 404 Not Found');
     echo("esame non trovato");
-    echo(__FILE__ . " " . __DIR__);
+    // echo(__FILE__ . " " . __DIR__);
     exit();
 }
 
@@ -755,7 +824,6 @@ try {
         $user = get_user($exam);
         if ($user === null) throw new ResponseError("user not authenticated");
         $response = null;
-        error_log("ACTION: $action");
         if ($action === 'csv_download') {
             if (!$user['is_admin']) throw new ResponseError("user not authorized");
             header('Content-Type: text/csv');
@@ -788,7 +856,6 @@ try {
                 'ok' => True,
                 'students' => $exam->get_student_list()
             ];
-            error_log("GET_STUDENTS $response");
         } else {
             throw new ResponseError("richiesta non valida");
         }
@@ -872,7 +939,7 @@ span.left {
             scegli matricola: <input id="set_matricola">  <select id="select_student"></select> <br />
             <button id="csv_download">download csv</button><br />
         </div>
-        <?php if ($exam->show_instructions) echo "<div id='instructions'>" . $exam->instructions_html . "</div>" ?>
+        <div id="instructions"></div>
         <?php if ($exam->show_legenda): ?>
         <div id="legenda">
             <p><b>legenda:</b>

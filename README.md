@@ -105,20 +105,20 @@ va usata solo per lo sviluppo in quanto accetta qualunque username e password.
 
 * *show_legenda:* mostra la legenda. Default: true
 
-* *exam:* il nome della radice del file xml
+* *\<exam>:* la radice del file xml
 
-* *instructions:* testo da presentare su ogni compito. Mettere l'attributo `format=html`
+* *\<instructions>:* testo da presentare su ogni compito. Mettere l'attributo `format=html`
 se è scritto in html
 
-* *shuffle:* gli elementi inclusi verranno mescolati tra loro
+* *\<shuffle>:* gli elementi inclusi verranno mescolati tra loro
 
-* *variants:* viene scelto un solo elemento tra quelli inclusi
+* *\<variants>:* viene scelto un solo elemento tra quelli inclusi
 
-* *exercise:* descrive un singolo esercizio
+* *\<exercise>:* descrive un singolo esercizio
 
-* *question:* descrive una domanda
+* *\<question>:* descrive una domanda
 
-* *answer:* la risposta attesa.
+* *\<answer>:* la risposta attesa.
 
 # possibili sviluppi futuri
 
