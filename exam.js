@@ -169,9 +169,9 @@ function main(data) {
                     var count = 0;
                     if (response.ok) {
                         $select.empty();
-                        $select.append('<option value="">-- mostra tutte le varianti --</option>');
+                        $select.append($("<option></option>").val("").text('-- mostra tutte le varianti --'));
                         response.students.forEach(function(student) {
-                            $select.append('<option value="' + student.matricola + '">' + student.cognome + ' ' + student.nome + '</option>');
+                            $select.append($("<option></option>").val(student.matricola).text(student.cognome + ' ' + student.nome));
                             count ++;
                         });
                     } else {
@@ -202,19 +202,25 @@ function main(data) {
                 if (data.answers.hasOwnProperty(question.form_id)) {
                     answer = data.answers[question.form_id];
                 }
-                $exercises.append(""
-                + "<p class='left'><span class='check' id='check_" + question.form_id + "'>&#9632;</span> "
-                + "<i>" + question.statement + "</i>"
-                + "<span class='fill'><input class='fill' id='question_" + question.form_id + "'></span>"
-                + "</p>");
-                $("#question_" + question.form_id).val(answer);
+                var $input = $("<input>").attr("id", 'question_' + question.form_id).val(answer);
+                var $check = $("<span>").addClass('check')
+                    .attr('id', 'check_' + question.form_id)
+                    .html("&#9632");
+                $exercises.append(
+                    $("<p></p>").addClass('left')
+                        .append($check)
+                        .append($("<i></i>").html(question.statement))
+                        .append($("<span></span>").addClass("fill").append($input))
+                    );
                 if (question.solution) {
-                    $exercises.append("<span style='color:red'>" + question.solution + "</span><br />\n");
+                    $exercises
+                        .append($("<span></span>".css('color','red').html(question.solution)))
+                        .append($("<br />"));
                 }
-                $("#question_" + question.form_id).change(function() {
+                $input.change(function() {
                     var val = $(this).val();
                     var changed = (val != data.answers[question.form_id]);
-                    $("#check_" + question.form_id).css("color", val==""?"black":changed?"red":"green");
+                    $check.css("color", val==""?"black":changed?"red":"green");
                     if (changed) $("#response").empty();                
                 }).change();
             });
