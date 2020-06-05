@@ -171,7 +171,9 @@ function main(data) {
                         $select.empty();
                         $select.append($("<option></option>").val("").text('-- mostra tutte le varianti --'));
                         response.students.forEach(function(student) {
-                            $select.append($("<option></option>").val(student.matricola).text(student.cognome + ' ' + student.nome));
+                            var $option = $("<option></option>").val(student.matricola).text(student.cognome + ' ' + student.nome);
+                            if (student.matricola == data.matricola) $option.attr("selected","selected");
+                            $select.append($option);
                             count ++;
                         });
                     } else {
@@ -214,7 +216,7 @@ function main(data) {
                     );
                 if (question.solution) {
                     $exercises
-                        .append($("<span></span>".css('color','red').html(question.solution)))
+                        .append($("<span></span>").css('color','red').html(question.solution))
                         .append($("<br />"));
                 }
                 $input.change(function() {
