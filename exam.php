@@ -251,11 +251,19 @@ function my_xml_get_bool($xml, $key, $default=null) {
     return $default;
 }
 
-function interpolate($template, $environment) {
-    foreach($environment as $key => $val) {
-        $template = str_replace('{{ student[\'' . $key . '\'] }}', $val, $template);
+function interpolate($template, $student) {
+    if ($student !== null) {
+        foreach($student as $key => $val) {
+            $template = str_replace('{{ student[\'' . $key . '\'] }}', $val, $template);
+        }
     }
-    return $template;
+    return $template . " INTERPOLATE";
+}
+
+function interpolate_mustache($template, $student) {
+    require __DIR__ . '/vendor/autoload.php';
+    $m = new Mustache_Engine(array('entity_flags' => ENT_QUOTES));
+    return $m->render($template, ['student' => $student]);
 }
 
 class Exam {
@@ -288,6 +296,7 @@ class Exam {
         $this->publish_text = my_xml_get_bool($root, "publish_text", False);
         $this->show_instructions = my_xml_get_bool($root, "show_instructions", True);
         $this->show_legenda = my_xml_get_bool($root, "show_legenda", True);
+        $this->use_mustache = my_xml_get_bool($root, "use_mustache", False);
 
         $this->timestamp = my_timestamp($this->date, $this->time);
         $this->end_timestamp = my_timestamp($this->date, $this->end_time);
@@ -328,11 +337,11 @@ class Exam {
         // error_log("IS OPEN {$this->is_open}");
 
         $this->IP = getenv('HTTP_CLIENT_IP')?:
-            getenv('HTTP_X_FORWARDED_FOR')?:
-            getenv('HTTP_X_FORWARDED')?:
-            getenv('HTTP_FORWARDED_FOR')?:
-            getenv('HTTP_FORWARDED')?:
-            getenv('REMOTE_ADDR');
+            (getenv('HTTP_X_FORWARDED_FOR')?:
+            (getenv('HTTP_X_FORWARDED')?:
+            (getenv('HTTP_FORWARDED_FOR')?:
+            (getenv('HTTP_(FORWARDED')?:
+            getenv('REMOTE_ADDR')))));
         $this->http_user_agent = array_get($_SERVER, 'HTTP_USER_AGENT');
     }
 
@@ -380,7 +389,7 @@ class Exam {
         $this->matricola = $matricola;
         $this->storage_filename = $this->storage_path . "/" . $matricola . ".jsons";
         $this->student = null;
-        if ($this->students !== null) {
+        if ($this->students !== null && $this->matricola) {
             $this->student = array_get($this->students, $this->matricola);
         }
 
@@ -390,10 +399,14 @@ class Exam {
         foreach ($root as $child) {
             if ($child->getName() === 'instructions' && $this->show_instructions) {
                 $this->instructions = (string) $child;
-                if ($this->student !== null) {
+                if (my_xml_get($child, 'engine') === 'mustache') {
+                    $this->instructions = interpolate_mustache($this->instructions, $this->student);
+                } else {
                     $this->instructions = interpolate($this->instructions, $this->student);
                 }
-                if (my_xml_get($child, 'format') === 'html') $this->instructions_html = $this->instructions;
+                if (my_xml_get($child, 'format') === 'html') { 
+                    $this->instructions_html = $this->instructions;
+                }
                 else $this->instructions_html = htmlspecialchars($this->instructions);
             }
         }    

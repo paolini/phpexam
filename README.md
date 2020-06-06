@@ -105,10 +105,22 @@ va usata solo per lo sviluppo in quanto accetta qualunque username e password.
 
 * *show_legenda:* mostra la legenda. Default: true
 
+* *students_csv:* nome di un file csv contenente una riga di intestazione e poi una riga per ogni studente. Ci deve essere una colonna con intestazione "matricola". Nelle \<instructions> sarà allora possibile fare riferimento ai campi relativi allo studente. Se ad esempio si inserisce una colonna "nome" si potrà ottenere il valore di quel campo con la sintassi {{ student['nome'] }}
+
 * *\<exam>:* la radice del file xml
 
 * *\<instructions>:* testo da presentare su ogni compito. Mettere l'attributo `format=html`
-se è scritto in html
+se è scritto in html. Mettere l'attributo `engine=mustache` per usare il template engine omonimo.
+Se è stato specificato un file csv con l'elenco degli studenti è possibile interpolare il testo 
+con i valori relativi allo studente. Ad esempio:
+
+``` 
+<instructions format=html engine=mustache>
+{{# student }}
+Cognome: {{ cognome }}, Nome: {{ nome }}
+{{/ student }}
+</instructions>
+```
 
 * *\<shuffle>:* gli elementi inclusi verranno mescolati tra loro
 
