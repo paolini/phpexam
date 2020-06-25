@@ -206,7 +206,7 @@ function main(data) {
                     answer = data.answers[question.form_id];
                 }
                 var $input = $("<input>").attr("id", 'question_' + question.form_id).val(answer);
-                $input.css("width","100%");
+                $input.css("width","95%");
                 var $check = $("<span>").addClass('check')
                     .attr('id', 'check_' + question.form_id)
                     .html("&#9632");

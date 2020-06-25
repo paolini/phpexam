@@ -12,8 +12,15 @@ function myErrorHandler($errno, $errstr, $errfile, $errline)
     return False;
 }
 
+function my_debug($msg) 
+{
+    myErrorHandler("debug",$msg,"","");
+}
+
 // set to the user defined error handler
 $old_error_handler = set_error_handler("myErrorHandler");
+
+// myErrorHandler(42, "hello there", "file", "line");
 
 function array_get($array, $key, $default=null) {
     if (isset($array[$key])) return $array[$key];
@@ -257,7 +264,7 @@ function interpolate($template, $student) {
             $template = str_replace('{{ student[\'' . $key . '\'] }}', $val, $template);
         }
     }
-    return $template . " INTERPOLATE";
+    return $template;
 }
 
 function interpolate_mustache($template, $student) {
@@ -410,7 +417,7 @@ class Exam {
                 else $this->instructions_html = htmlspecialchars($this->instructions);
             }
         }    
-        error_log("ISTRUZIONI " . $this->instructions_html);        
+        // error_log("ISTRUZIONI " . $this->instructions_html);        
 
         if ($this->start_timestamp === null) {
             // bisogna controllare se il compito e' gia' partito
@@ -830,6 +837,8 @@ try {
 
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
 <?php
+
+
 
 try {
     try {
