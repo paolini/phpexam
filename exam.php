@@ -2,19 +2,20 @@
 
 date_default_timezone_set('Europe/Rome');
 
-function myErrorHandler($errno, $errstr, $errfile, $errline)
+function my_log($msg) 
 {
     $fp = fopen(__DIR__ . '/var/phpexam.log', 'at');
     if ($fp !== null) {
-        fwrite($fp, "$errno $errstr $errfile $errline\n");
+        $timestamp = date(DATE_ATOM);
+        fwrite($fp, "$timestamp $msg\n");
         fclose($fp);
     }
-    return False;
 }
 
-function my_debug($msg) 
+function myErrorHandler($errno, $errstr, $errfile, $errline)
 {
-    myErrorHandler("debug",$msg,"","");
+    my_log("$errno $errstr $errfile:$errline");
+    return False;
 }
 
 // set to the user defined error handler
@@ -617,9 +618,14 @@ class Exam {
                             $obj['user']['nome']
                         ];
                         if (isset($obj['submit'])) {
-                            array_push($row,'submit');
                             $submit = $obj['submit'];
-                            if (count($submit) !== count($this->answers)) throw new Exception("data mismatch");
+                            if (count($submit) !== count($this->answers)) {
+                                // number of answer have been modified after submission
+                                array_push($row,'mismatch');
+                                // throw new Exception("data mismatch");
+                            } else {
+                                array_push($row,'submit');
+                            }
                             for ($i=0; $i < count($submit) ; $i ++) {
                                 $submit[$i]['exercise_id'] = $this->answers[$i]['exercise_id'];
                             }
@@ -837,13 +843,11 @@ try {
 
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
 <?php
-
-
-
 try {
     try {
         $action = array_get($_POST,'action');
         $user = get_user($exam);
+        my_log("POST ".$action." ".$exam->exam_id." ".$user['user']);
         if ($user === null) throw new ResponseError("user not authenticated");
         $response = null;
         if ($action === 'csv_download') {
@@ -892,10 +896,17 @@ try {
     error_log("response_Error");
     header('Content-Type: application/json');
     echo json_encode(['ok' => False, 'error' => "$e"]);
+} catch (Exception $e) {
+    my_log($e);
+    throw($e);
 }
 ?>
 
 <?php else: ?>
+
+<?php 
+my_log("GET ".$exam->exam_id);
+?>
 
 <!DOCTYPE html>
 <html>
