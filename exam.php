@@ -681,6 +681,8 @@ function get_compito($exam, $user) {
     $response = [];
     $response['user'] = $user;
     $response['matricola'] = $exam->matricola;
+    $response['cognome'] = array_get($user, 'cognome');
+    $response['nome'] = array_get($user, 'nome');
     $response['timestamp'] = $exam->timestamp;
     $response['end_timestamp'] = $exam->end_timestamp;
     $response['end_time'] = $exam->end_time;
