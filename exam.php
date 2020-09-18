@@ -550,6 +550,7 @@ class Exam {
             return $obj;
         }
         if ($name === 'instructions') return null;
+        if (substr($name,-1) === '_') return null;
         throw new ExamError("elemento XML inatteso <$name>");
     }
 

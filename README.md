@@ -132,6 +132,9 @@ Cognome: {{ cognome }}, Nome: {{ nome }}
 
 * *\<answer>:* la risposta attesa.
 
+* ogni altro tag che finisce con un *underscore* (ad esempio \<ignore_>)
+verrà ignorato.
+
 # possibili sviluppi futuri
 
 * domande a risposta multipla
