@@ -292,6 +292,128 @@ function main(data) {
     }
 }
 
+// upload scans
+
+function readAsDataURL(file) {
+    return new Promise((resolve, reject)=>{
+      let fileReader = new FileReader();
+      fileReader.onload = function(){
+        return resolve({data:fileReader.result, name:file.name, size: file.size, type: file.type});
+      }
+      fileReader.readAsDataURL(file);
+    })
+  } 
+  
+  pages = [];
+  
+  async function draw_image(page) {
+    var img = page.img;
+    var rotation = page.rotation;
+    var canvas = page.canvas;
+  
+    var MAX_DIAG = 1000;
+    var scale = MAX_DIAG / Math.sqrt(img.width*img.width + img.height*img.height);
+    var width = img.width;
+    var height = img.height;
+    if (scale > 1.0) scale = 1.0;
+    width = width * scale;
+    height = height * scale;
+    if (rotation == 90 || rotation == 270) {
+      canvas.width = height;
+      canvas.height = width;
+    } else {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    var ctx = canvas.getContext("2d");
+    ctx.translate(canvas.width/2,canvas.height/2);
+    ctx.rotate(rotation*Math.PI/180);
+    ctx.drawImage(img, -width/2, -height/2, width, height);
+  }
+  
+  async function create_page(file, n, div) {
+    var page = {"n": n};
+    page.img = document.createElement("img");
+    var load = await readAsDataURL(file);
+    page.img.src = load.data;
+    await page.img.decode();
+    
+    page.rotation = 0;
+  
+    page.canvas = document.createElement('canvas');
+    page.canvas.id = "canvas_" + n;
+  
+    var button_left = document.createElement('button');
+    var button_right = document.createElement('button');
+    button_left.innerText = "rotate left";
+    button_right.innerText = "rotate right";
+    button_left.onclick = function() {
+      page.rotation = (page.rotation + 270) % 360;
+      draw_image(page);
+    };
+    button_right.onclick = function() {
+      page.rotation = (page.rotation + 90) % 360;
+      draw_image(page);
+    };
+    div.append("pagina "+ (page.n + 1) +" ");
+    div.appendChild(button_left);
+    div.appendChild(button_right);
+    div.appendChild(document.createElement('br'));
+    div.appendChild(page.canvas);
+    div.appendChild(document.createElement('br'));
+  
+    draw_image(page);
+    var dataurl = page.canvas.toDataURL("image/png");
+  
+    return page;
+  }
+  
+  async function upload(input, div) {
+    for (var n=0; n <input.files.length; ++n) {
+      var page = await create_page(input.files[n], pages.length, div);
+      pages.push(page);
+    }
+  }
+  
+  function create_pdf() {
+    var doc = new jspdf.jsPDF({
+      orientation: "p",
+      unit: "mm",
+      format: "a4",
+      putOnlyUsedFonts: true
+    });
+    for (var n=0; n<pages.length; ++n) {
+      var page = pages[n];
+      if (n>0) doc.addPage();
+      scale = 0.2;
+      const PAGE_WIDTH = 200;
+      const PAGE_HEIGHT = 280;
+      if (page.canvas.width * scale > PAGE_WIDTH) {
+        scale = PAGE_WIDTH / page.canvas.width; 
+      }
+      if (page.canvas.height * scale > PAGE_HEIGHT) {
+        scale = PAGE_HEIGHT / page.canvas.height;
+      }
+      doc.addImage(page.canvas.toDataURL("image/jpeg"), 'JPEG', 
+        10, 15, page.canvas.width*scale, page.canvas.height*scale);
+      doc.text(10,10, "pagina " + (n+1));
+    }
+    var pdf = doc.output();
+    $.post("", {
+        user: $("#user").val(),
+        password: $("#password").val(),
+        action: 'pdf_upload',   
+        data: doc.output(),
+    }).done(function(data){
+       console.log(data);
+    });
+    // doc.save("out.pdf");
+  };
+  
+
+// MAIN
+
+
 $(function(){
     $("#login").click(function() {load('login');});
     $("#set_matricola").change(function(){load('reload')});
@@ -304,4 +426,21 @@ $(function(){
             action: 'csv_download'            
         },"POST");
     });
+    $("#upload_input_id").change(function() {
+        upload(this, $("#upload_div_id")[0]);
+    });
+    $("#upload_pdf_id").click(create_pdf);
 })
+
+/*
+  // main function
+  document.addEventListener("DOMContentLoaded", function(event) { 
+    var input = document.getElementById("upload_input_id");
+    var div = document.getElementById("upload_div_id"); 
+    input.addEventListener('change', function() {
+      upload(input, div);
+    });
+    var pdf_button = document.getElementById("upload_pdf_id")
+    pdf_button.onclick = create_pdf;
+  });
+*/

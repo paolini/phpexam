@@ -885,6 +885,12 @@ try {
                 'ok' => True,
                 'students' => $exam->get_student_list()
             ];
+        } else if ($action === 'pdf_upload') {
+            error_log("PDF UPLOAD");
+            $response = [
+                'ok' => False,
+                'error' => 'non ancora implementato'
+            ];
         } else {
             throw new ResponseError("richiesta non valida");
         }
@@ -905,7 +911,7 @@ try {
 }
 ?>
 
-<?php else: ?>
+<?php else: ?> 
 
 <?php 
 my_log("GET ".$exam->exam_id);
@@ -917,6 +923,7 @@ my_log("GET ".$exam->exam_id);
     <title><?php echo("{$exam->course}: {$exam->name}")?></title>
     <script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML"></script>
     <script src="https://code.jquery.com/jquery-3.5.0.min.js" integrity="sha256-xNzN2a4ltkB44Mc/Jz3pT4iU1cmeR0FkXs4pru/JxaQ=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.2.0/jspdf.umd.min.js" integrity="sha512-YnVU8b8PyEw7oHtil6p9au8k/Co0chizlPltAwx25CMWX6syRiy24HduUeWi/WpBbJh4Y4562du0CHAlvnUeeQ==" crossorigin="anonymous"></script>
     <script>
         <?php echo file_get_contents(__DIR__ . '/exam.js')?> 
     </script>
@@ -991,6 +998,13 @@ span.left {
             <div id="response" style="color:blue"></div>
         </div>
         <div id="exercises">
+        </div>
+        <div id="upload">
+            <p>Quando hai finito il compito puoi inviare le scansioni dei files</p>
+            <input id="upload_input_id" type="file" multiple>
+            <button id="upload_pdf_id">carica file</button>
+            <div id="upload_div_id">
+            </div>
         </div>
     </div>
   </body>
