@@ -20,7 +20,8 @@ function post(path, params, method='post') {
     const form = document.createElement('form');
     form.method = method;
     form.action = path;
-  
+    form.target = "_blank"; // open in new tab
+
     for (const key in params) {
       if (params.hasOwnProperty(key)) {
         const hiddenField = document.createElement('input');
@@ -31,7 +32,7 @@ function post(path, params, method='post') {
         form.appendChild(hiddenField);
       }
     }
-  
+    
     document.body.appendChild(form);
     form.submit();
   }
@@ -369,11 +370,42 @@ function readAsDataURL(file) {
   
     return page;
   }
+
+  function post_pdf(blob) {
+    formdata = new FormData();
+    formdata.append('file', blob, 'upload.pdf');
+    formdata.append('user', $("#user").val());
+    formdata.append('password', $("#password").val());
+    formdata.append('action', 'pdf_upload');
+    $.ajax({
+        url: "",
+        type: "POST",
+        data: formdata,
+        processData: false,
+        contentType: false
+    }).done(function(data){
+        if (data.ok) {
+            pages = [];
+            $("#upload_div_id").empty();
+            populate_pdf_list(data.dir);
+        } else {
+            $div = $("#upload_list");
+            $div.append("<p>Errore: file non caricato</p>");
+        } 
+        console.log("response: " + data);
+    });
+  }
   
   async function upload(input, div) {
     for (var n=0; n <input.files.length; ++n) {
-      var page = await create_page(input.files[n], pages.length, div);
-      pages.push(page);
+      var file = input.files[n];
+      if (file.type == 'application/pdf' || file.name.toLowerCase().endsWith(".pdf")) {
+        post_pdf(file);
+      } else {
+          // assume image
+        var page = await create_page(file, pages.length, div);
+        pages.push(page);
+      }
     }
   }
   
@@ -385,7 +417,7 @@ function readAsDataURL(file) {
         var a = document.createElement('a');
         a.appendChild(document.createTextNode(files[i]));
         a.data_filename = files[i];
-        a.href="#";
+        a.href="";
         a.onclick = function() {
             post("", {
                 user: $("#user").val(),
@@ -395,6 +427,30 @@ function readAsDataURL(file) {
             }, "post");
         };
         li.appendChild(a);
+        li.appendChild(document.createTextNode(" "));
+        var button = document.createElement('button');
+        button.appendChild(document.createTextNode("elimina"));
+        button.data_filename = files[i];
+        button.onclick = function() {
+            if (confirm("Veramente vuoi eliminare il file?")) {
+                $.post("", {
+                    user: $("#user").val(),
+                    password: $("#password").val(),
+                    action: 'pdf_delete',
+                    filename: this.data_filename
+                }).done(function(data) {
+                    if (data.ok) {
+                        pages = [];
+                        $("#upload_div_id").empty();
+                        populate_pdf_list(data.dir);            
+                    } else {
+                        $div = $("#upload_list");
+                        $div.append("<p>Errore: file non eliminato</p>");             
+                    }
+                });
+            }
+        }
+        li.appendChild(button);
         $div[0].appendChild(li);
     }
   }
@@ -422,30 +478,9 @@ function readAsDataURL(file) {
         10, 15, page.canvas.width*scale, page.canvas.height*scale);
       doc.text(10,10, "pagina " + (n+1));
     }
-    // var pdf = doc.output();
     var blob = new Blob([doc.output('blob')], { type: 'application/pdf'});
-    formdata = new FormData();
-    formdata.append('file', blob, 'prova.pdf');
-    formdata.append('user', $("#user").val());
-    formdata.append('password', $("#password").val());
-    formdata.append('action', 'pdf_upload');
-    $.ajax({
-        url: "",
-        type: "POST",
-        data: formdata,
-        processData: false,
-        contentType: false
-    }).done(function(data){
-        if (data.ok) {
-            pages = [];
-            $("#upload_div_id").empty();
-            populate_pdf_list(data.dir);
-        } else {
-            $div = $("#upload_list");
-            $div.append("<p>Errore: file non caricato</p>");
-        } 
-        console.log("response: " + data);
-    });
+    post_pdf(blob);
+    // var pdf = doc.output();
     // doc.save("out.pdf");
   };
   

@@ -677,17 +677,26 @@ class Exam {
         return $list;
     }
 
+    function pdf_filename_is_valid($filename) {
+        $prefix = $this->matricola . '_';
+        return substr($filename, 0, strlen($prefix)) == $prefix &&
+            substr($filename, -4) == ".pdf" &&
+            strpos($filename,"/") === false && 
+            strpos($filename, "\\") === false && 
+            strpos($filename, " ") === false;
+    }
+
     function get_files_list() {
         $files = [];
         if ($handle = opendir($this->storage_path)) {
             while (false !== ($file = readdir($handle))) {
-                if (substr($file, 0, strlen($this->matricola)+1) == ($this->matricola . '_')
-                  && substr($file, -4) == ".pdf") {
+                if ($this->pdf_filename_is_valid($file)) {
                     array_push($files, $file);
-                    }
                 }
+            }
             closedir($handle);
         }
+        sort($files);
         return $files;
     }
 }
@@ -923,13 +932,8 @@ try {
         } else if ($action === 'pdf_download') {
             $matricola = $user['matricola'];
             $exam->compose_for($matricola);
-            $filename = $_POST['filename'];
-            if (substr($filename, 0, strlen($matricola)+1) == ($matricola . '_')
-                && substr($filename, -4) == ".pdf"
-                && strpos($filename, '/') === false
-                && strpos($filename, ' ') === false
-                && strpos($filename, '\\') === false
-            ) {
+            $filename = array_get($_POST, 'filename');
+            if ($exam->pdf_filename_is_valid($filename)) {
                 $filename = $exam->storage_path . "/" . $filename;
                 header("Content-type: application/pdf");
                 // Send the file to the browser.
@@ -938,6 +942,25 @@ try {
                 $response = [
                     'ok' => False,
                     'error' => 'non autorizzato'
+                ];
+            }
+        } else if ($action === 'pdf_delete') {
+            $matricola = $user['matricola'];
+            $exam->compose_for($matricola);
+            $filename = array_get($_POST, 'filename');
+            error_log("REMOVE FILE " . $filename);
+            if ($exam->pdf_filename_is_valid($filename)) {
+                $filename = $exam->storage_path . "/" . $filename;
+                unlink($filename);
+                $dir = $exam->get_files_list();
+                $response = [
+                    'ok' => True,
+                    'dir' => $dir
+                ];
+            } else {
+                $response = [
+                    'ok' => False,
+                    'error' => 'nome file non valido'
                 ];
             }
         } else {
