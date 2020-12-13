@@ -362,6 +362,7 @@ function readAsDataURL(file) {
     div.appendChild(document.createElement('br'));
     div.appendChild(page.canvas);
     div.appendChild(document.createElement('br'));
+    div.appendChild(document.createElement('hr'));
   
     draw_image(page);
     var dataurl = page.canvas.toDataURL("image/png");
@@ -380,7 +381,21 @@ function readAsDataURL(file) {
     $div = $("#upload_list");
     $div.empty();
     for(var i=0; i<files.length; ++i) {
-        $div.append("<li>" + files[i] + "</li>");
+        var li = document.createElement('li');
+        var a = document.createElement('a');
+        a.appendChild(document.createTextNode(files[i]));
+        a.data_filename = files[i];
+        a.href="#";
+        a.onclick = function() {
+            post("", {
+                user: $("#user").val(),
+                password: $("#password").val(),
+                action: 'pdf_download',
+                filename: this.data_filename          
+            }, "post");
+        };
+        li.appendChild(a);
+        $div[0].appendChild(li);
     }
   }
 
@@ -422,6 +437,8 @@ function readAsDataURL(file) {
         contentType: false
     }).done(function(data){
         if (data.ok) {
+            pages = [];
+            $("#upload_div_id").empty();
             populate_pdf_list(data.dir);
         } else {
             $div = $("#upload_list");

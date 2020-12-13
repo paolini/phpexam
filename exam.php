@@ -681,7 +681,7 @@ class Exam {
         $files = [];
         if ($handle = opendir($this->storage_path)) {
             while (false !== ($file = readdir($handle))) {
-                if (substr($file, 0, strlen($this->$matricola)) == $this->$matricola
+                if (substr($file, 0, strlen($this->matricola)+1) == ($this->matricola . '_')
                   && substr($file, -4) == ".pdf") {
                     array_push($files, $file);
                     }
@@ -903,6 +903,7 @@ try {
         } else if ($action === 'pdf_upload') {
             $now = new DateTime('NOW');
             $matricola = $user["matricola"];
+            $exam->compose_for($matricola);
             $filename = $exam->storage_path . "/" . $matricola . "_" . $now->format('c') . ".pdf";
             $r = move_uploaded_file($_FILES["file"]["tmp_name"], $filename);
             if ($r) {
@@ -917,6 +918,26 @@ try {
                 $response = [
                     'ok' => False,
                     'error' => 'upload fallito'
+                ];
+            }
+        } else if ($action === 'pdf_download') {
+            $matricola = $user['matricola'];
+            $exam->compose_for($matricola);
+            $filename = $_POST['filename'];
+            if (substr($filename, 0, strlen($matricola)+1) == ($matricola . '_')
+                && substr($filename, -4) == ".pdf"
+                && strpos($filename, '/') === false
+                && strpos($filename, ' ') === false
+                && strpos($filename, '\\') === false
+            ) {
+                $filename = $exam->storage_path . "/" . $filename;
+                header("Content-type: application/pdf");
+                // Send the file to the browser.
+                readfile($filename);
+            } else {
+                $response = [
+                    'ok' => False,
+                    'error' => 'non autorizzato'
                 ];
             }
         } else {
