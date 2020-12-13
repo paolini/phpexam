@@ -290,6 +290,7 @@ function main(data) {
             }
         }
     }
+    populate_pdf_list(data['file_list']);
 }
 
 // upload scans
@@ -375,6 +376,14 @@ function readAsDataURL(file) {
     }
   }
   
+  function populate_pdf_list(files) {
+    $div = $("#upload_list");
+    $div.empty();
+    for(var i=0; i<files.length; ++i) {
+        $div.append("<li>" + files[i] + "</li>");
+    }
+  }
+
   function create_pdf() {
     var doc = new jspdf.jsPDF({
       orientation: "p",
@@ -398,14 +407,27 @@ function readAsDataURL(file) {
         10, 15, page.canvas.width*scale, page.canvas.height*scale);
       doc.text(10,10, "pagina " + (n+1));
     }
-    var pdf = doc.output();
-    $.post("", {
-        user: $("#user").val(),
-        password: $("#password").val(),
-        action: 'pdf_upload',   
-        data: doc.output(),
+    // var pdf = doc.output();
+    var blob = new Blob([doc.output('blob')], { type: 'application/pdf'});
+    formdata = new FormData();
+    formdata.append('file', blob, 'prova.pdf');
+    formdata.append('user', $("#user").val());
+    formdata.append('password', $("#password").val());
+    formdata.append('action', 'pdf_upload');
+    $.ajax({
+        url: "",
+        type: "POST",
+        data: formdata,
+        processData: false,
+        contentType: false
     }).done(function(data){
-       console.log(data);
+        if (data.ok) {
+            populate_pdf_list(data.dir);
+        } else {
+            $div = $("#upload_list");
+            $div.append("<p>Errore: file non caricato</p>");
+        } 
+        console.log("response: " + data);
     });
     // doc.save("out.pdf");
   };

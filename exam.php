@@ -676,6 +676,20 @@ class Exam {
         });
         return $list;
     }
+
+    function get_files_list() {
+        $files = [];
+        if ($handle = opendir($this->storage_path)) {
+            while (false !== ($file = readdir($handle))) {
+                if (substr($file, 0, strlen($this->$matricola)) == $this->$matricola
+                  && substr($file, -4) == ".pdf") {
+                    array_push($files, $file);
+                    }
+                }
+            closedir($handle);
+        }
+        return $files;
+    }
 }
 
 function get_compito($exam, $user) {
@@ -692,6 +706,7 @@ function get_compito($exam, $user) {
     $response['is_open'] = $exam->is_open;
     $response['ok'] = True;
     $response['instructions_html'] = $exam->instructions_html;  
+    $response['file_list'] = $exam->get_files_list();
 
     if ($exam->start_timestamp !== null || array_get($user, 'is_admin') || $exam->publish_text) {
         // lo studente ha iniziato (e forse anche finito) l'esame
@@ -886,11 +901,24 @@ try {
                 'students' => $exam->get_student_list()
             ];
         } else if ($action === 'pdf_upload') {
-            error_log("PDF UPLOAD");
-            $response = [
-                'ok' => False,
-                'error' => 'non ancora implementato'
-            ];
+            $now = new DateTime('NOW');
+            $matricola = $user["matricola"];
+            $filename = $exam->storage_path . "/" . $matricola . "_" . $now->format('c') . ".pdf";
+            $r = move_uploaded_file($_FILES["file"]["tmp_name"], $filename);
+            if ($r) {
+                my_log("upload " . $filename);
+                $dir = $exam->get_files_list();
+                $response = [
+                    'ok' => True,
+                    'dir' => $dir
+                    ];
+            } else {
+                my_log("upload " . $filename . " failed");
+                $response = [
+                    'ok' => False,
+                    'error' => 'upload fallito'
+                ];
+            }
         } else {
             throw new ResponseError("richiesta non valida");
         }
@@ -1001,6 +1029,8 @@ span.left {
         </div>
         <div id="upload">
             <p>Quando hai finito il compito puoi inviare le scansioni dei files</p>
+            <ul id="upload_list">
+            </ul>
             <input id="upload_input_id" type="file" multiple>
             <button id="upload_pdf_id">carica file</button>
             <div id="upload_div_id">
