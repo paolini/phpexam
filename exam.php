@@ -1072,7 +1072,12 @@ span.left {
         <div id="exercises">
         </div>
         <div id="upload">
-            <p>Quando hai finito il compito puoi inviare le scansioni dei files</p>
+            <p>Quando hai finito il compito puoi inviare le scansioni dei files. 
+            Premi sul pulsante [scegli files] per caricare un singolo file in formato PDF 
+            oppure una foto di ogni pagina. 
+            Le foto vanno ruotate, se necessario, prima di premere 
+            sul pulsante [carica file] che provvederà a generare un file PDF.
+            </p>
             <ul id="upload_list">
             </ul>
             <input id="upload_input_id" type="file" multiple>

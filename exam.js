@@ -257,6 +257,7 @@ function main(data) {
                 }, 1000);
             } else {
                 $("#submit").hide();
+                $("#timer").html("<span style='color:red'>non è possibile inviare le risposte</span>");
             }
         }
     } else {
@@ -412,12 +413,15 @@ function readAsDataURL(file) {
   function populate_pdf_list(files) {
     $div = $("#upload_list");
     $div.empty();
+    if (files.length == 0) {
+        $div.append("<span style='color:red'>nessun file caricato</span>");
+    }
     for(var i=0; i<files.length; ++i) {
         var li = document.createElement('li');
         var a = document.createElement('a');
         a.appendChild(document.createTextNode(files[i]));
         a.data_filename = files[i];
-        a.href="";
+        a.href="#";
         a.onclick = function() {
             post("", {
                 user: $("#user").val(),
@@ -465,18 +469,16 @@ function readAsDataURL(file) {
     for (var n=0; n<pages.length; ++n) {
       var page = pages[n];
       if (n>0) doc.addPage();
-      scale = 0.2;
-      const PAGE_WIDTH = 200;
-      const PAGE_HEIGHT = 280;
-      if (page.canvas.width * scale > PAGE_WIDTH) {
-        scale = PAGE_WIDTH / page.canvas.width; 
-      }
+      const PAGE_WIDTH = 195;
+      const PAGE_HEIGHT = 265;
+      scale = PAGE_WIDTH / page.canvas.width;
+      if (scale > 1.0) scale = 1.0;
       if (page.canvas.height * scale > PAGE_HEIGHT) {
         scale = PAGE_HEIGHT / page.canvas.height;
       }
       doc.addImage(page.canvas.toDataURL("image/jpeg"), 'JPEG', 
-        10, 15, page.canvas.width*scale, page.canvas.height*scale);
-      doc.text(10,10, "pagina " + (n+1));
+        5, 15, page.canvas.width*scale, page.canvas.height*scale);
+      doc.text(10,10, $("#user").val() + $("#cognome").val() + " " + $("#nome").val() + " pagina " + (n+1));
     }
     var blob = new Blob([doc.output('blob')], { type: 'application/pdf'});
     post_pdf(blob);
