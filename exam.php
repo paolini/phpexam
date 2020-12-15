@@ -772,7 +772,7 @@ function submit($exam, $user) {
     $is_admin = array_get($user, 'is_admin');
 
     if ($is_admin) {
-        $matricola = array_get($_POST['matricola'], $matricola);
+        $matricola = array_get($_POST, 'matricola', $matricola);
     }
 
     $exam->compose_for($matricola);
@@ -946,6 +946,9 @@ try {
             }
         } else if ($action === 'pdf_download') {
             $matricola = $user['matricola'];
+            if ($user['is_admin']) {
+                $matricola = array_get($_POST, 'matricola', $matricola);
+            }
             $exam->compose_for($matricola);
             $filename = array_get($_POST, 'filename');
             if ($exam->pdf_filename_is_valid($filename)) {
@@ -1087,7 +1090,7 @@ span.left {
         <div id="exercises">
         </div>
         <div id="upload">
-            <p>Quando hai finito il compito puoi inviare le scansioni dei files. 
+            <p>Quando hai finito il compito puoi inviare le scansioni dello svolgimento. 
             Premi sul pulsante [scegli files] per caricare un singolo file in formato PDF 
             oppure una foto di ogni pagina. 
             Le foto vanno ruotate, se necessario, prima di premere 

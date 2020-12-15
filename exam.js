@@ -61,9 +61,11 @@ function load(action) {
             return;
         }
         if (action == 'logout') {
+            $("#admin").hide();
             $("#text").hide();
             $("#auth_error").text("").show();
             $("#auth").show();
+            $("#response").empty();
         } else {
             if (data.user == null) {
                 error("errore interno 231");
@@ -197,6 +199,8 @@ function main(data) {
                     $select.hide();
                 }            
             });
+    } else {
+        $("#admin").hide();
     }
 
     $("#text").show();
@@ -214,7 +218,10 @@ function main(data) {
                 if (data.answers.hasOwnProperty(question.form_id)) {
                     answer = data.answers[question.form_id];
                 }
-                var $input = $("<input>").attr("id", 'question_' + question.form_id).val(answer);
+                var $input = $("<input>")
+                    .attr("id", 'question_' + question.form_id)
+                    .attr("class", 'exam')
+                    .val(answer);
                 $input.css("width","95%");
                 var $check = $("<span>").addClass('check')
                     .attr('id', 'check_' + question.form_id)
@@ -232,8 +239,9 @@ function main(data) {
                 }
                 $input.keyup(function() {
                     var val = $(this).val();
-                    var changed = (val != data.answers[question.form_id]);
-                    $check.css("color", changed?"red":(val==""?"black":"green"));
+                    var submitted = data.answers[question.form_id];
+                    if (submitted === undefined) submitted = '';
+                    $check.css('color', val != submitted ?'red':(val=='' ? 'black' : 'green'));
                     // if (changed) $("#response").empty();            
                 }).keyup();
                 $input.change(function() {
@@ -244,7 +252,10 @@ function main(data) {
         });
         MathJax.Hub.Queue(["Typeset",MathJax.Hub]);
         $("#submit").show().off('click').click(function(){submit(data)});
-        if (data.matricola != data.user.matricola) $("#submit").hide(); // evita di inviare dati di un utente impersonificato
+        if (data.matricola != data.user.matricola) {
+            $("#submit").hide(); // evita di inviare dati di un utente impersonificato
+            $("input.exam").attr('readonly', 'readonly');
+        }
         $("#set_matricola").val(data.matricola);
 
         $("#timer").empty();
@@ -453,10 +464,12 @@ function readAsDataURL(file) {
         a.data_filename = files[i];
         a.href="#";
         a.onclick = function() {
-            post("", {
+            var data = {
                 action: 'pdf_download',
-                filename: this.data_filename          
-            }, "post");
+                filename: this.data_filename,
+                matricola: $("#set_matricola").val()
+            };
+            post("", data, "post");
         };
         li.appendChild(a);
         li.appendChild(document.createTextNode(" "));
