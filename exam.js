@@ -39,8 +39,10 @@ function post(path, params, method='post') {
 
 function load(action) {
     var post = {};
-    post.user = $("#user").val();
-    post.password = $("#password").val();
+    if (action == 'login') {
+        post.user = $("#user").val();
+        post.password = $("#password").val();
+    }
     post.action = action;
     post.solutions = $("#show_solutions").prop('checked');
     var matricola = $("#set_matricola").val();
@@ -53,16 +55,24 @@ function load(action) {
     clean_error();
     $.post("", post, function(data, status) {
         if (!data.ok) {
-            error(data.error || "errore interno 243");
+            if (action != 'start') {
+                error(data.error || "errore interno 243");
+            }
             return;
         }
-        if (!data.user.authenticated) {
-            error("errore interno 231");
-            return;
+        if (action == 'logout') {
+            $("#text").hide();
+            $("#auth_error").text("").show();
+            $("#auth").show();
+        } else {
+            if (data.user == null) {
+                error("errore interno 231");
+                return;
+            }
+            $("#auth_error").text("").hide();
+            $("#auth").hide();
+            main(data);
         }
-        $("#auth_error").text("").hide();
-        $("#auth").hide();
-        main(data);
     });
 }
 
@@ -77,8 +87,6 @@ function timestamp_to_string(d) {
 
 function submit(data) {
     var post = {};
-    post.user = $("#user").val();
-    post.password = $("#password").val();
     post.action = "submit";
 
     var new_answers = {};
@@ -91,11 +99,11 @@ function submit(data) {
     });
     
     $.post("", post, function(response, status) {
-        if (response.user.authenticated) {
+        if (response.user != null) {
             $("#auth_error").text("").hide();
             $("#auth").hide();
         } else {
-            $("#auth_error").text(response.user.error || "errore interno #231").show();
+            $("#auth_error").text("errore interno #231").show();
             $("#auth_error").show();
             $("#auth").show();
         }
@@ -162,35 +170,33 @@ function main(data) {
     if (data.user.is_admin) {
         $("#admin").show();
         $.post("", {
-                user: $("#user").val(),
-                password: $("#password").val(),
-                action: 'get_students'}, 
-                function(response, status) {
-                    $select = $('#select_student');
-                    var count = 0;
-                    if (response.ok) {
-                        $select.empty();
-                        $select.append($("<option></option>").val("").text('-- mostra tutte le varianti --'));
-                        response.students.forEach(function(student) {
-                            var $option = $("<option></option>").val(student.matricola).text(student.cognome + ' ' + student.nome);
-                            if (student.matricola == data.matricola) $option.attr("selected","selected");
-                            $select.append($option);
-                            count ++;
-                        });
-                    } else {
-                        console.log(response.error);
-                    }
-                    if (count > 0) {
-                        $select.show();
-                        $select.off("change");
-                        $select.change(function() {
-                            var val = $select.val();
-                            $('#set_matricola').val(val).change();
-                        });
-                    } else {
-                        $select.hide();
-                    }            
-                });
+            action: 'get_students'}, 
+            function(response, status) {
+                $select = $('#select_student');
+                var count = 0;
+                if (response.ok) {
+                    $select.empty();
+                    $select.append($("<option></option>").val("").text('-- mostra tutte le varianti --'));
+                    response.students.forEach(function(student) {
+                        var $option = $("<option></option>").val(student.matricola).text(student.cognome + ' ' + student.nome);
+                        if (student.matricola == data.matricola) $option.attr("selected","selected");
+                        $select.append($option);
+                        count ++;
+                    });
+                } else {
+                    console.log(response.error);
+                }
+                if (count > 0) {
+                    $select.show();
+                    $select.off("change");
+                    $select.change(function() {
+                        var val = $select.val();
+                        $('#set_matricola').val(val).change();
+                    });
+                } else {
+                    $select.hide();
+                }            
+            });
     }
 
     $("#text").show();
@@ -375,8 +381,6 @@ function readAsDataURL(file) {
   function post_pdf(blob) {
     formdata = new FormData();
     formdata.append('file', blob, 'upload.pdf');
-    formdata.append('user', $("#user").val());
-    formdata.append('password', $("#password").val());
     formdata.append('action', 'pdf_upload');
     $.ajax({
         url: "",
@@ -424,8 +428,6 @@ function readAsDataURL(file) {
         a.href="#";
         a.onclick = function() {
             post("", {
-                user: $("#user").val(),
-                password: $("#password").val(),
                 action: 'pdf_download',
                 filename: this.data_filename          
             }, "post");
@@ -438,8 +440,6 @@ function readAsDataURL(file) {
         button.onclick = function() {
             if (confirm("Veramente vuoi eliminare il file?")) {
                 $.post("", {
-                    user: $("#user").val(),
-                    password: $("#password").val(),
                     action: 'pdf_delete',
                     filename: this.data_filename
                 }).done(function(data) {
@@ -491,14 +491,23 @@ function readAsDataURL(file) {
 
 
 $(function(){
-    $("#login").click(function() {load('login');});
-    $("#set_matricola").change(function(){load('reload')});
-    $("#show_solutions").change(function(){load('reload')});
-    $("#show_variants").change(function(){load('reload')});
+    $("#login").click(function() {
+        load('login');
+    });
+    $("#logout").click(function() {
+        load('logout')
+    });
+    $("#set_matricola").change(function(){
+        load('reload')
+    });
+    $("#show_solutions").change(function(){
+        load('reload')
+    });
+    $("#show_variants").change(function(){
+        load('reload')
+    });
     $("#csv_download").click(function() {
         post("", {
-            user: $("#user").val(),
-            password: $("#password").val(),
             action: 'csv_download'            
         },"POST");
     });
@@ -506,17 +515,6 @@ $(function(){
         upload(this, $("#upload_div_id")[0]);
     });
     $("#upload_pdf_id").click(create_pdf);
-})
 
-/*
-  // main function
-  document.addEventListener("DOMContentLoaded", function(event) { 
-    var input = document.getElementById("upload_input_id");
-    var div = document.getElementById("upload_div_id"); 
-    input.addEventListener('change', function() {
-      upload(input, div);
-    });
-    var pdf_button = document.getElementById("upload_pdf_id")
-    pdf_button.onclick = create_pdf;
-  });
-*/
+    load('start');
+})

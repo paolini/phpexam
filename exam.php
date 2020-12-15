@@ -2,6 +2,8 @@
 
 date_default_timezone_set('Europe/Rome');
 
+session_start();
+
 function my_log($msg) 
 {
     $fp = fopen(__DIR__ . '/var/phpexam.log', 'at');
@@ -37,41 +39,27 @@ function authenticate() {
     $ldapPort = "636";	// (default 389)
     $ldapUser  = ""; // ldap User (rdn or dn)
     $ldapPassword = "";
-    $user = [
-        'authenticated' => false
-    ];
     
     if (!function_exists("ldap_connect")) {
-        error_log("ldap not installed... failing ldap authentication");
-        return $user; // failed!!
+        throw new Exception("ldap not installed... failing ldap authentication");
     }   
     $ldapConnection = ldap_connect($ldapHost, $ldapPort);
     
     if (!$ldapConnection) {
-        $user['error'] = "Non riesco a collegarmi al server di autenticazione (ldap)";
-        return $user;
+        throw new Exception("Non riesco a collegarmi al server di autenticazione (ldap)");
     }
 
-    if (isset($_POST["user"]) && $_POST["user"] != "") {
-        $user['user'] = $_POST['user'];
-        $ldapUser = addslashes(trim($_POST["user"]));
-    } else {
-        $user['error'] = "Inserisci il nome utente";
-        return $user;
-    }
-
-    if (isset($_POST["password"]) && $_POST["password"] != "") {
-        $ldapPassword = addslashes(trim($_POST["password"]));
-    } else {
-        $user['error'] = "Inserisci password";
-        return $user;
-    }
+    $ldapUser = array_get($_POST, 'user', '');
+    if ($ldapUser) return null;
+    $ldapUser = addslashes(trim($ldapUser));
+    
+    $ldapPassword = array_get($_POST, 'password', '');
+    $ldapPassword = addslashes(trim($ldapPassword));
 
     // binding to ldap server
     ldap_set_option($ldapConnection, LDAP_OPT_PROTOCOL_VERSION, 3) or die('Unable to set LDAP protocol version');
     ldap_set_option($ldapConnection, LDAP_OPT_REFERRALS, 0);
 
-    $role = 'dm';
     $base_dn = 'ou=people,dc=unipi,dc=it';
 
     $bind_dn = 'uid=' . $ldapUser . ',' . $base_dn;
@@ -79,49 +67,55 @@ function authenticate() {
 
     // verify binding
     if (!$ldapbind) {
-        $user['error'] = "Credenziali non valide!";
+        my_log("credenziali non valide");
         ldap_close($ldapConnection);
-        return $user;
+        return null;
     }
 
     $results = ldap_search($ldapConnection, "dc=unipi,dc=it", "uid=" . $ldapUser);
     
     if (ldap_count_entries($ldapConnection, $results) != 1) {
-        $user['error'] = "Utente non trovato!";
+        my_log("utente non trovato");
         ldap_close($ldapConnection);
-        return $user;
+        return null;
     }
 
     $matches = ldap_get_entries($ldapConnection, $results);
     $m = $matches[0];
-    $user['nome'] = $m['givenname'][0];
-    $user['cognome'] = $m['sn'][0];
-    // $user['common_name'] = $m['cn'][0];
-    $user['matricola'] = array_get($m, 'unipistudentematricola',[$ldapUser])[0];
-    $user['authenticated'] = true;
     ldap_close($ldapConnection);
-
-    return $user;
+    return [
+        'nome' => $m['givenname'][0],
+        'cognome' => $m['sn'][0],
+        // $user['common_name'] = $m['cn'][0];
+        'matricola' => array_get($m, 'unipistudentematricola',[$ldapUser])[0]
+    ];
 }
 
 function fake_authenticate() {
-    $user = [
-        'authenticated' => false
+    $username = array_get($_POST, 'user', '');
+    if ($username == '') return null;
+
+    return [
+        'matricola' => $username,
+        'user' => $username,
+        'nome' => $username,
+        'cognome' => $username,
+        'is_fake' => true
     ];
+}
 
-    if (isset($_POST["user"]) && $_POST["user"] != "") {
-        $user['matricola'] = $_POST['user'];
-        $user['user'] = $_POST['user'];
-    } else {
-        $user['error'] = "Inserisci il nome utente";
-        return $user;
+function get_user($exam) {
+    foreach($exam->auth_methods as $auth) {
+        if ($auth === 'ldap') $u = authenticate();
+        else if ($auth === 'fake') $u = fake_authenticate();
+        if ($u !== null) {
+            $user = $u;
+            $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
+            $_SESSION['user'] = $user;
+            return $user;
+        };
     }
-    $user['nome'] = $_POST["user"];
-    $user['cognome'] = $_POST["user"];
-    $user['authenticated'] = true;
-    $user['is_fake'] = true;
-
-    return $user;
+    return null;
 }
 
 function my_int32($x) {
@@ -556,7 +550,7 @@ class Exam {
 
     function write($user, $action, $object) {
         if (!isset($this->storage_filename)) throw new Exception('Call Exam::login before Exam::write');
-        # error_log("writing to file " . $this->storage_filename);
+        // error_log("writing to file " . $this->storage_filename);
         $fp = fopen($this->storage_filename, "at");
         if ($fp === False) throw new Exception('Cannot write file ' + $this->storage_filename);
         $timestamp = date(DATE_ATOM);
@@ -758,7 +752,7 @@ function submit($exam, $user) {
     $response = [];
     $response['user'] = $user;
     $response['ok'] = False;
-    if (!$user['authenticated']) {
+    if ($user === null) {
         $response['message'] = "utente non autenticato!";
         return;
     }
@@ -800,20 +794,6 @@ function submit($exam, $user) {
     return $response;
 }
 
-function get_user($exam) {
-    $user = null;
-    foreach($exam->auth_methods as $auth) {
-        // error_log("trying " . $auth);
-        if ($auth === 'ldap') $user = authenticate();
-        else if ($auth === 'fake') $user = fake_authenticate();
-        if ($user['authenticated']) {
-            $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
-            return $user;
-        };
-    }
-    return null;
-}
-
 function request_path()
 {
     $request_uri = explode('/', trim($_SERVER['REQUEST_URI'], '/'));
@@ -839,7 +819,12 @@ class ResponseError extends Exception {
     }
 }
 
-// EXECUTION STARTS HERE
+/*******************************
+ * EXECUTION STARTS HERE       *
+ *******************************/
+
+// error_log("****************");
+
 $exam_id = array_get($_GET,'id');
 
 if ($exam_id === null) $exam_id = request_path();
@@ -866,25 +851,43 @@ try {
     echo("<html><body><pre>{$e->getMessage()}</pre></html></body>");
     exit();
 }
+
+$user = array_get($_SESSION, 'user', null);
+// error_log("SESSION USER: " . ($user==null? "<null>" : array_get($user,'user')));
+$action = array_get($_POST, 'action');
+// error_log("ACTION $action");
+if ($action == 'login') {
+    $user = get_user($exam);
+    if ($user != null) {
+        $action = 'reload';
+    }
+} 
 ?>
 
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
 <?php
 try {
     try {
-        $action = array_get($_POST,'action');
-        $user = get_user($exam);
-        my_log("POST ".$action." ".$exam->exam_id." ".$user['user']);
-        if ($user === null) throw new ResponseError("user not authenticated");
+        my_log("POST ".$action." ".$exam->exam_id." ".array_get($user, 'user', 'user not authenticated'));
+        // error_log("POST ".$action." ".$exam->exam_id." ".array_get($user, 'user', 'user not authenticated'));
         $response = null;
-        if ($action === 'csv_download') {
+        if ($user == null) {
+            if ($action == 'login') throw new ResponseError("utente non riconosciuto o password non valida");
+            throw new ResponseError("utente non autenticato");
+        }
+
+        if ($action === 'logout') {
+            session_destroy();   
+            $user = null;
+            $response = ['ok' => True];
+        } else if ($action === 'csv_download') {
             if (!$user['is_admin']) throw new ResponseError("user not authorized");
             header('Content-Type: text/csv');
             header('Content-Disposition: attachment; filename="'.$exam_id.'.csv";');
             $fp = fopen('php://output', 'w');
             $exam->csv_response($fp);
             fclose($fp);
-        } else if ($action === 'reload' || $action === 'login') {
+        } else if ($action === 'reload') {
             $matricola = $user['matricola'];
             if ($user['is_admin']) {
                 $matricola = array_get($_POST, 'matricola', '');
@@ -948,7 +951,7 @@ try {
             $matricola = $user['matricola'];
             $exam->compose_for($matricola);
             $filename = array_get($_POST, 'filename');
-            error_log("REMOVE FILE " . $filename);
+            my_log("REMOVE FILE " . $filename);
             if ($exam->pdf_filename_is_valid($filename)) {
                 $filename = $exam->storage_path . "/" . $filename;
                 unlink($filename);
@@ -964,6 +967,7 @@ try {
                 ];
             }
         } else {
+            error_log("richiesta non valida");
             throw new ResponseError("richiesta non valida");
         }
         if ($response !== null) {
@@ -974,7 +978,6 @@ try {
         throw new ResponseError("$e");
     }
 } catch (ResponseError $e) {
-    error_log("response_Error");
     header('Content-Type: application/json');
     echo json_encode(['ok' => False, 'error' => "$e"]);
 } catch (Exception $e) {
@@ -997,6 +1000,7 @@ my_log("GET ".$exam->exam_id);
     <script src="https://code.jquery.com/jquery-3.5.0.min.js" integrity="sha256-xNzN2a4ltkB44Mc/Jz3pT4iU1cmeR0FkXs4pru/JxaQ=" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.2.0/jspdf.umd.min.js" integrity="sha512-YnVU8b8PyEw7oHtil6p9au8k/Co0chizlPltAwx25CMWX6syRiy24HduUeWi/WpBbJh4Y4562du0CHAlvnUeeQ==" crossorigin="anonymous"></script>
     <script>
+        var user_authenticated = <?= $user !== null ? "true" : "false" ?>;
         <?php echo file_get_contents(__DIR__ . '/exam.js')?> 
     </script>
     <style>
@@ -1047,6 +1051,7 @@ span.left {
             <b>Cognome:</b> <span id="cognome"></span> <br />
             <b>Nome:</b> <span id="nome"></span> <br />
             <b>Matricola:</b> <span id="matricola"></span><br />
+            <button id="logout">logout</button><br />
         </div>
         <div id="admin" hidden>
             <b>riservato agli amministratori:</b><br/>

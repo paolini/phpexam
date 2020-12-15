@@ -1,6 +1,9 @@
-2020-04-29-svolgimenti/*
+20*.csv
 20*.xml
+test.xml
 istruzioni.md
 example-storage/*
 var/*
 vendor/*
+test/*
+.vscode/*
