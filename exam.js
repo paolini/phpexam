@@ -55,7 +55,7 @@ function load(action) {
     clean_error();
     $.post("", post, function(data, status) {
         if (!data.ok) {
-            if (action != 'start') {
+            if (action != 'load') {
                 error(data.error || "errore interno 243");
             }
             return;

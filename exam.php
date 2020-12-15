@@ -102,23 +102,33 @@ function fake_authenticate($username, $password) {
 }
 
 function get_user($exam) {
-    $username = array_get($_POST, 'user');
-    $password = array_get($_POST, 'password');
-    // my_log("get_user " . $username);
-    foreach($exam->auth_methods as $auth) {
-        $u = null;
-        if ($auth === 'ldap') $u = authenticate($username, $password);
-        else if ($auth === 'fake') $u = fake_authenticate($username, $password);
-        else throw new Exception("invalid authentication method $auth");
-        if ($u !== null) {
-            $user = $u;
-            my_log("USER LOGIN $auth OK " . $user['user']);
-            $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
-            $_SESSION['user'] = $user;
-            return $user;
-        };
+    $action = array_get($_POST, 'action');
+    $user = null;
+    
+    if ($action == 'login') {
+        $username = array_get($_POST, 'user');
+        $password = array_get($_POST, 'password');
+        // my_log("get_user " . $username);
+        foreach($exam->auth_methods as $auth) {
+            $u = null;
+            if ($auth === 'ldap') $u = authenticate($username, $password);
+            else if ($auth === 'fake') $u = fake_authenticate($username, $password);
+            else throw new Exception("invalid authentication method $auth");
+            if ($u !== null) {
+                $user = $u;
+                $_SESSION['user'] = $user;
+                my_log("USER LOGIN $auth OK " . $user['user']);
+                break;
+            }
+        }
+    } else {
+        $user = array_get($_SESSION, 'user', null);
     }
-    return null;
+
+    if ($user != null) {
+        $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
+    }
+    return $user;
 }
 
 function my_int32($x) {
@@ -863,16 +873,11 @@ try {
     exit();
 }
 
-$user = array_get($_SESSION, 'user', null);
-// error_log("SESSION USER: " . ($user==null? "<null>" : array_get($user,'user')));
 $action = array_get($_POST, 'action');
-// error_log("ACTION $action");
-if ($action == 'login') {
-    $user = get_user($exam);
-    if ($user != null) {
-        $action = 'reload';
-    }
-} 
+$user = get_user($exam);
+if ($action == 'login' && $user != null) {
+    $action = 'load';
+}
 ?>
 
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>

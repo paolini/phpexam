@@ -2,21 +2,16 @@
 <exam 
     course='Nome di un bel corso'  
     name='Prova scritta di esempio'
-    duration_minutes='2'
+    duration_minutes='5'
     secret='shhht!' 
     admins='admin'
     storage_path='example-storage'
-    auth_methods='ldap,fake'
+    auth_methods='ldap'
+    auth_methods_='ldap,fake'
 >
     <instructions format='html'>
-    Questo è un esame di prova. Puoi inserire liberamente le risposte.
-    L'autenticazione accetta qualunque username e la password non viene controllata.
-    Se hai svolto l'esame con un certo username non lo potrai più ripetere.
-    Vedrai fissate le risposte che hai già dato.
-    Se usi 'admin' come username puoi vedere l'interfaccia di amministrazione.
-    Potrai vedere le risposte date da tutti (inserendo il corrispondente numero di matricola).
-    Le password non vengono memorizzate. Puoi ricaricare la pagina per autenticarti con uno username 
-    diverso.
+    Questo è un esame di prova. 
+    Puoi inserire liberamente le risposte.
     </instructions>
     <shuffle>
         <variants>
