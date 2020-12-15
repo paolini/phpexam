@@ -116,15 +116,15 @@ function submit(data) {
         }
         if (response.ok == true) {
             data.answers = new_answers;
-            Object.entries(new_answers).forEach(function(item){
-                var key = item[0];
-                var val = item[1];
-                data.answers[key] = val;
-                $("#question_" + key).change();
-            });
         } else {
             $("#response").css("color", "red");
         }
+        Object.entries(data.answers).forEach(function(item){
+            var key = item[0];
+            var val = item[1];
+            data.answers[key] = val;
+            $("#question_" + key).keyup();
+        });
     });
 }
 
@@ -204,6 +204,8 @@ function main(data) {
     $exercises.empty();
     $exercises.append("<br>\n");
     if (data.text) { // abbiamo il testo del compito!
+        $("#upload").show();
+        $("#legenda").show();
         if (!data.answers) data.answers = {};
         data.text.exercises.forEach(function(exercise, i) {
             $exercises.append("<b>Esercizio " + (exercise.number) + ":</b> " + exercise.statement + "<br />");
@@ -228,12 +230,15 @@ function main(data) {
                         .append($("<span></span>").css('color','red').html(question.solution))
                         .append($("<br />"));
                 }
-                $input.change(function() {
+                $input.keyup(function() {
                     var val = $(this).val();
                     var changed = (val != data.answers[question.form_id]);
-                    $check.css("color", val==""?"black":changed?"red":"green");
-                    if (changed) $("#response").empty();                
-                }).change();
+                    $check.css("color", changed?"red":(val==""?"black":"green"));
+                    // if (changed) $("#response").empty();            
+                }).keyup();
+                $input.change(function() {
+                    submit(data);
+                })
             });
             $exercises.append("<br /><br />");
         });
@@ -268,14 +273,35 @@ function main(data) {
         }
     } else {
         // non abbiamo il testo del compito
+        $("#legenda").hide();
+        $("#upload").hide();
+
         function display_start_button() {
+            var html = 
             $exercises.html("<span style='color:blue'><b>Quando sei pronto puoi <button id='start_button'>iniziare!</button></b></span>");
             $("#start_button").click(function(){load("start");});
             if (data.duration_minutes) {
                 $exercises.append("<p>Durata della prova " + seconds_to_human_string(data.duration_minutes*60) + ".</p>");
             }
             if (data.end_time) {
-                $exercises.append("<!-- p>Da completare comunque entro le ore " + data.end_time + ".</p-->");
+                $exercises.append("<p>Da completare comunque entro le ore " + data.end_time + ".</p>");
+            }
+            if (data.seconds_to_start_timeline > 0) {
+                var target_time = Date.now() + 1000*data.seconds_to_start_timeline;
+                stop_timer();
+                var $timer = $("<span style='color:blue'></span>");
+                $exercises.append($timer);
+                timer = window.setInterval(function() {
+                    var s = Math.round((target_time - Date.now()) / 1000);
+                    if (s<0) s = 0;
+                    $timer.html("<b>Devi iniziare il compito entro " + seconds_to_human_string(s) + "</b>");
+                }, 1000);
+                window.setTimeout(function() {
+                    stop_timer();
+                    $timer.html("<b>Il compito è iniziato!</b>");
+                }, 1000*(data.seconds_to_start_timeline+1));
+            } else {
+                $exercises.append("<span style='color:red'><b>Il compito è già iniziato!</b></span>");
             }
         }
         if (data.is_open) {
@@ -438,7 +464,7 @@ function readAsDataURL(file) {
         button.appendChild(document.createTextNode("elimina"));
         button.data_filename = files[i];
         button.onclick = function() {
-            if (confirm("Veramente vuoi eliminare il file?")) {
+            if (confirm(this.data_filename+"\nVeramente vuoi eliminare il file?")) {
                 $.post("", {
                     action: 'pdf_delete',
                     filename: this.data_filename
@@ -516,5 +542,5 @@ $(function(){
     });
     $("#upload_pdf_id").click(create_pdf);
 
-    load('start');
+    load('load');
 })

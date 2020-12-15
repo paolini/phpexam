@@ -34,11 +34,13 @@ function array_get($array, $key, $default=null) {
 // validated by a publicy available CA.
 putenv("LDAPTLS_REQCERT=never");
 
-function authenticate() {
+function authenticate($username, $password) {
     $ldapHost = "ldaps://idm2.unipi.it";
     $ldapPort = "636";	// (default 389)
-    $ldapUser  = ""; // ldap User (rdn or dn)
-    $ldapPassword = "";
+    $ldapUser  = $username; // ldap User (rdn or dn)
+    $ldapPassword = $password;
+
+    if ($username == "") return null;
     
     if (!function_exists("ldap_connect")) {
         throw new Exception("ldap not installed... failing ldap authentication");
@@ -49,11 +51,7 @@ function authenticate() {
         throw new Exception("Non riesco a collegarmi al server di autenticazione (ldap)");
     }
 
-    $ldapUser = array_get($_POST, 'user', '');
-    if ($ldapUser) return null;
     $ldapUser = addslashes(trim($ldapUser));
-    
-    $ldapPassword = array_get($_POST, 'password', '');
     $ldapPassword = addslashes(trim($ldapPassword));
 
     // binding to ldap server
@@ -64,16 +62,16 @@ function authenticate() {
 
     $bind_dn = 'uid=' . $ldapUser . ',' . $base_dn;
     $ldapbind = @ldap_bind($ldapConnection, $bind_dn, $ldapPassword);
-
+    
     // verify binding
     if (!$ldapbind) {
         my_log("credenziali non valide");
         ldap_close($ldapConnection);
         return null;
     }
-
-    $results = ldap_search($ldapConnection, "dc=unipi,dc=it", "uid=" . $ldapUser);
     
+    $results = ldap_search($ldapConnection, "dc=unipi,dc=it", "uid=" . $ldapUser);
+
     if (ldap_count_entries($ldapConnection, $results) != 1) {
         my_log("utente non trovato");
         ldap_close($ldapConnection);
@@ -91,8 +89,7 @@ function authenticate() {
     ];
 }
 
-function fake_authenticate() {
-    $username = array_get($_POST, 'user', '');
+function fake_authenticate($username, $password) {
     if ($username == '') return null;
 
     return [
@@ -105,11 +102,17 @@ function fake_authenticate() {
 }
 
 function get_user($exam) {
+    $username = array_get($_POST, 'user');
+    $password = array_get($_POST, 'password');
+    // my_log("get_user " . $username);
     foreach($exam->auth_methods as $auth) {
-        if ($auth === 'ldap') $u = authenticate();
-        else if ($auth === 'fake') $u = fake_authenticate();
+        $u = null;
+        if ($auth === 'ldap') $u = authenticate($username, $password);
+        else if ($auth === 'fake') $u = fake_authenticate($username, $password);
+        else throw new Exception("invalid authentication method $auth");
         if ($u !== null) {
             $user = $u;
+            my_log("USER LOGIN $auth OK " . $user['user']);
             $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
             $_SESSION['user'] = $user;
             return $user;
@@ -300,8 +303,9 @@ class Exam {
         $this->show_legenda = my_xml_get_bool($root, "show_legenda", True);
         $this->use_mustache = my_xml_get_bool($root, "use_mustache", False);
 
-        $this->timestamp = my_timestamp($this->date, $this->time);
-        $this->end_timestamp = my_timestamp($this->date, $this->end_time);
+        $this->timestamp = my_timestamp($this->date, $this->time); // inizio della prova
+        $this->end_timestamp = my_timestamp($this->date, $this->end_time); // termine massimo
+        $this->start_timeline = $this->end_timestamp - 60*$this->duration_minutes; // puoi iniziare entro questo istante senza penalita
         
         $this->storage_path = my_xml_get($root, 'storage_path', $this->exam_id);
         if (substr($this->storage_path, 0, 1) !== '/') {
@@ -329,9 +333,15 @@ class Exam {
         $this->start_timestamp = null;
         $this->seconds_to_start = 0;
         if ($this->timestamp && $this->now < $this->timestamp) {
+            // il compito deve ancora iniziare
             $this->is_open = False;
             $this->seconds_to_start = $this->timestamp - $this->now;
-        } 
+        }
+        $this->seconds_to_start_timeline = 0;
+        if ($this->timestamp && $this->now < $this->start_timeline) {
+            // puoi iniziare senza penalita'
+            $this->seconds_to_start_timeline = $this->start_timeline - $this->now;
+        }
         // error_log("END_TIMESTAMP {$this->end_timestamp} {$this->now}");
         if ($this->end_timestamp && $this->now > $this->end_timestamp) {
             $this->is_open = False;
@@ -387,7 +397,7 @@ class Exam {
     }
 
     function compose_for($matricola) {
-
+        my_log("compose_for $matricola timestamp " . $this->timestamp);
         $this->matricola = $matricola;
         $this->storage_filename = $this->storage_path . "/" . $matricola . ".jsons";
         $this->student = null;
@@ -706,6 +716,7 @@ function get_compito($exam, $user) {
     $response['end_time'] = $exam->end_time;
     $response['duration_minutes'] = $exam->duration_minutes;
     $response['seconds_to_start'] = $exam->seconds_to_start;
+    $response['seconds_to_start_timeline'] = $exam->seconds_to_start_timeline;
     $response['is_open'] = $exam->is_open;
     $response['ok'] = True;
     $response['instructions_html'] = $exam->instructions_html;  
@@ -887,7 +898,7 @@ try {
             $fp = fopen('php://output', 'w');
             $exam->csv_response($fp);
             fclose($fp);
-        } else if ($action === 'reload') {
+        } else if ($action === 'reload' || $action === 'load') {
             $matricola = $user['matricola'];
             if ($user['is_admin']) {
                 $matricola = array_get($_POST, 'matricola', '');
@@ -919,7 +930,8 @@ try {
             $filename = $exam->storage_path . "/" . $matricola . "_" . $now->format('c') . ".pdf";
             $r = move_uploaded_file($_FILES["file"]["tmp_name"], $filename);
             if ($r) {
-                my_log("upload " . $filename);
+                $hash = md5_file($filename);
+                my_log("upload " . $filename. " md5 hash " . $hash);
                 $dir = $exam->get_files_list();
                 $response = [
                     'ok' => True,
@@ -1050,9 +1062,7 @@ span.left {
         <div id="user_div">
             <b>Cognome:</b> <span id="cognome"></span> <br />
             <b>Nome:</b> <span id="nome"></span> <br />
-            <b>Matricola:</b> <span id="matricola"></span><br />
-            <button id="logout">logout</button><br />
-        </div>
+            <b>Matricola:</b> <span id="matricola"></span> <button id="logout">logout</button><br />        </div>
         <div id="admin" hidden>
             <b>riservato agli amministratori:</b><br/>
             mostra soluzioni: <input id="show_solutions" type="checkbox" checked><br />
@@ -1071,7 +1081,7 @@ span.left {
         <?php endif; ?>
         <div>            
             <div id="timer"></div>
-            <button id="submit" hidden>invia risposte</button>
+            <button id="submit" hidden>invia risposte</button> 
             <div id="response" style="color:blue"></div>
         </div>
         <div id="exercises">
@@ -1081,7 +1091,7 @@ span.left {
             Premi sul pulsante [scegli files] per caricare un singolo file in formato PDF 
             oppure una foto di ogni pagina. 
             Le foto vanno ruotate, se necessario, prima di premere 
-            sul pulsante [carica file] che provvederà a generare un file PDF.
+            sul pulsante [carica file] che provvederà a generare un unico file PDF.
             </p>
             <ul id="upload_list">
             </ul>
