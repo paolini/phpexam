@@ -274,12 +274,14 @@ function main(data) {
                     if (s <= 0) {
                         $("#timer").html("<span style='color:" + color + "'>Tempo scaduto</span>");
                         $("#submit").hide();
+                        $("input.exam").attr('readonly', 'readonly');
                         stop_timer();
                     }
                 }, 1000);
             } else {
                 $("#submit").hide();
                 $("#timer").html("<span style='color:red'>non è possibile inviare le risposte</span>");
+                $("input.exam").attr('readonly', 'readonly');
             }
         }
     } else {
