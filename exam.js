@@ -379,8 +379,9 @@ function readAsDataURL(file) {
     ctx.drawImage(img, -width/2, -height/2, width, height);
   }
   
-  async function create_page(file, n, div) {
-    var page = {"n": n};
+  async function create_page(file) {
+    var page = {};
+    page.div = document.createElement("div");
     page.img = document.createElement("img");
     var load = await readAsDataURL(file);
     page.img.src = load.data;
@@ -389,12 +390,13 @@ function readAsDataURL(file) {
     page.rotation = 0;
   
     page.canvas = document.createElement('canvas');
-    page.canvas.id = "canvas_" + n;
   
     var button_left = document.createElement('button');
     var button_right = document.createElement('button');
-    button_left.innerText = "rotate left";
-    button_right.innerText = "rotate right";
+    var button_remove = document.createElement('button');
+    button_left.innerText = "ruota a sinistra";
+    button_right.innerText = "ruota a destra";
+    button_remove.innerText = "rimuovi pagina";
     button_left.onclick = function() {
       page.rotation = (page.rotation + 270) % 360;
       draw_image(page);
@@ -403,19 +405,57 @@ function readAsDataURL(file) {
       page.rotation = (page.rotation + 90) % 360;
       draw_image(page);
     };
-    div.append("pagina "+ (page.n + 1) +" ");
-    div.appendChild(button_left);
-    div.appendChild(button_right);
-    div.appendChild(document.createElement('br'));
-    div.appendChild(page.canvas);
-    div.appendChild(document.createElement('br'));
-    div.appendChild(document.createElement('hr'));
+    button_remove.onclick = function() {
+        page.div.parentNode.removeChild(page.div);
+        page.div = null;
+        page.canvas = null;
+    };
+    page.div.appendChild(button_left);
+    page.div.appendChild(button_right);
+    page.div.appendChild(button_remove);
+    page.div.appendChild(document.createElement('br'));
+    page.div.appendChild(page.canvas);
+    page.div.appendChild(document.createElement('br'));
+    page.div.appendChild(document.createElement('hr'));
   
     draw_image(page);
-    var dataurl = page.canvas.toDataURL("image/png");
+    // var dataurl = page.canvas.toDataURL("image/png");
   
     return page;
   }
+
+  function create_pdf() {
+    $("#upload_pdf_id").hide();
+    $("#upload_input_id").hide();
+    if (pages.length==0) return;
+    var doc = new jspdf.jsPDF({
+      orientation: "p",
+      unit: "mm",
+      format: "a4",
+      putOnlyUsedFonts: true
+    });
+    var page_count = 0;
+    for (var n=0; n<pages.length; ++n) {
+      var page = pages[n];
+      if (page.canvas == null) continue; // pagina rimossa
+      if (page_count>0) doc.addPage();
+      const PAGE_WIDTH = 195;
+      const PAGE_HEIGHT = 265;
+      scale = PAGE_WIDTH / page.canvas.width;
+      if (scale > 1.0) scale = 1.0;
+      if (page.canvas.height * scale > PAGE_HEIGHT) {
+        scale = PAGE_HEIGHT / page.canvas.height;
+      }
+      doc.addImage(page.canvas.toDataURL("image/jpeg"), 'JPEG', 
+        5, 15, page.canvas.width*scale, page.canvas.height*scale);
+      doc.text(10,10, $("#matricola").text() + " " + $("#cognome").text() + " " + $("#nome").text() + " pagina " + (page_count + 1));
+      page_count ++;
+    }
+    var blob = new Blob([doc.output('blob')], { type: 'application/pdf'});
+    post_pdf(blob);
+    // var pdf = doc.output();
+    // doc.save("out.pdf");
+  };
 
   function post_pdf(blob) {
     formdata = new FormData();
@@ -434,8 +474,9 @@ function readAsDataURL(file) {
             populate_pdf_list(data.dir);
         } else {
             $div = $("#upload_list");
-            $div.append("<p>Errore: file non caricato</p>");
+            $div.append("<p style='color:red'>Errore: " + data.error + ". File non caricato</p>");
         } 
+        $("#upload_input_id").show();
         console.log("response: " + data);
     });
   }
@@ -447,9 +488,14 @@ function readAsDataURL(file) {
         post_pdf(file);
       } else {
           // assume image
-        var page = await create_page(file, pages.length, div);
+        var page = await create_page(file);
+        div.append(page.div);
         pages.push(page);
       }
+    }
+    $('#upload_input_id').val('');
+    if (pages.length>0) {
+        $('#upload_pdf_id').show();
     }
   }
   
@@ -498,35 +544,7 @@ function readAsDataURL(file) {
         li.appendChild(button);
         $div[0].appendChild(li);
     }
-  }
-
-  function create_pdf() {
-    var doc = new jspdf.jsPDF({
-      orientation: "p",
-      unit: "mm",
-      format: "a4",
-      putOnlyUsedFonts: true
-    });
-    for (var n=0; n<pages.length; ++n) {
-      var page = pages[n];
-      if (n>0) doc.addPage();
-      const PAGE_WIDTH = 195;
-      const PAGE_HEIGHT = 265;
-      scale = PAGE_WIDTH / page.canvas.width;
-      if (scale > 1.0) scale = 1.0;
-      if (page.canvas.height * scale > PAGE_HEIGHT) {
-        scale = PAGE_HEIGHT / page.canvas.height;
-      }
-      doc.addImage(page.canvas.toDataURL("image/jpeg"), 'JPEG', 
-        5, 15, page.canvas.width*scale, page.canvas.height*scale);
-      doc.text(10,10, $("#user").val() + $("#cognome").val() + " " + $("#nome").val() + " pagina " + (n+1));
-    }
-    var blob = new Blob([doc.output('blob')], { type: 'application/pdf'});
-    post_pdf(blob);
-    // var pdf = doc.output();
-    // doc.save("out.pdf");
-  };
-  
+  }  
 
 // MAIN
 
@@ -553,9 +571,10 @@ $(function(){
         },"POST");
     });
     $("#upload_input_id").change(function() {
+        $("#upload_pdf_id").hide();
         upload(this, $("#upload_div_id")[0]);
     });
-    $("#upload_pdf_id").click(create_pdf);
+    $("#upload_pdf_id").click(create_pdf).hide();
 
     load('load');
 })

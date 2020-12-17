@@ -932,7 +932,9 @@ try {
             if ($file['error'] > 0) {
                 my_log("php file upload error code: " . $file['error']);
                 my_log("file upload size: " . $file['size']);
-                throw new ResponseError("errore caricamento file (error code: " . $file['error'] . ")");
+                $error = "Errore nel caricamento file (error code: " . $file['error'] . ")";
+                if ($file['error'] == UPLOAD_ERR_INI_SIZE) $error = "il file è troppo grosso";
+                throw new ResponseError($error);
             } 
             error_log("PDF_UPLOAD: " . json_encode($file));
             $now = new DateTime('NOW');
