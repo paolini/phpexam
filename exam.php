@@ -327,6 +327,8 @@ class Exam {
             mkdir($this->storage_path, 0777, True);
         }
 
+        $this->csv_delimiter = my_xml_get($root, 'csv_delimiter', ",");
+
         $this->students = null;
         $students_csv_filename = my_xml_get($root, 'students_csv');
         if ($students_csv_filename !== null) {
@@ -335,6 +337,7 @@ class Exam {
             }
             $this->load_students_csv($students_csv_filename);
         }
+        $this->check_students = my_xml_get_bool($root, "check_students", False);
 
         $this->instructions_html = null;
         
@@ -375,7 +378,7 @@ class Exam {
         $headers = null;
         $students = [];
         $ident_column = null;
-        while (($line = fgetcsv($h)) !== FALSE) {
+        while (($line = fgetcsv($h, 1000, $this->csv_delimiter)) !== FALSE) {
             if ($line === [ null ]) continue;
             if ($headers === null) {
                 $headers = $line;
@@ -402,8 +405,35 @@ class Exam {
         return in_array($matricola, $this->admins);
     }
 
-    function start() {
+    function compute_countdowns() {
+        $this->seconds_to_finish = null;
+        if ($this->start_timestamp !== null) {
+            // calcola il tempo che manca alla fine del compito
+            // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
+
+            if ($this->duration_minutes !== null) {
+                $this->seconds_to_finish = $this->start_timestamp + $this->duration_minutes * 60 - $this->now;
+            }
+
+            // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
+            // non deve superare il tempo massimo
+            if ($this->end_timestamp !== null) {
+                $s = $this->end_timestamp - $this->now;
+                if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
+                    $this->seconds_to_finish = $s;
+                }
+            }
+
+            if ($this->seconds_to_finish !== null && $this->seconds_to_finish <=0) {
+                $this->seconds_to_finish = 0;
+            }
+        }
+    }
+
+    function start($user) {
         $this->start_timestamp = $this->now;
+        $this->write($user, 'start', True); /* segnamo l'inizio del compito */
+        $this->compute_countdowns();
     }
 
     function compose_for($matricola) {
@@ -434,47 +464,23 @@ class Exam {
         }    
         // error_log("ISTRUZIONI " . $this->instructions_html);        
 
-        if ($this->start_timestamp === null) {
-            // bisogna controllare se il compito e' gia' partito
-            $start = $this->read('start', False); // attenzione: non bisogna permettere di rifare uno start, prendiamo l'ultimo
-            if ($start === null) {
-                $this->start_timestamp = null;
-            } else {
-                $this->start_timestamp = $start['timestamp'];
-                if ($this->timestamp !== null && $this->timestamp > $this->start_timestamp) {
-                    /*
-                    * se l'ultimo start e' anteriore alla data di inizio il compito e' stato riproposto
-                    * e possiamo iniziare nuovamente
-                    */
-                    $this->start_timestamp = null;
-                }
-            }
+        // determina l'istante di inizio effettivo del compito 
+        // per questo studente
+        $start = $this->read('start', False); // attenzione: non bisogna permettere di rifare uno start, prendiamo l'ultimo
+        if ($start === null) {
+            $this->start_timestamp = null;
         } else {
-            // e' stato chiamato $this->start() per avviare immediatamente il compito
-        }
-
-        $this->seconds_to_finish = null;
-        if ($this->start_timestamp !== null) {
-            // calcola il tempo che manca alla fine del compito
-            // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
-
-            if ($this->duration_minutes !== null) {
-                $this->seconds_to_finish = $this->start_timestamp + $this->duration_minutes * 60 - $this->now;
-            }
-
-            // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
-            // non deve superare il tempo massimo
-            if ($this->end_timestamp !== null) {
-                $s = $this->end_timestamp - $this->now;
-                if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
-                    $this->seconds_to_finish = $s;
-                }
-            }
-
-            if ($this->seconds_to_finish !== null && $this->seconds_to_finish <=0) {
-                $this->seconds_to_finish = 0;
+            $this->start_timestamp = $start['timestamp'];
+            if ($this->timestamp !== null && $this->timestamp > $this->start_timestamp) {
+                /*
+                * se l'ultimo start e' anteriore alla data di inizio il compito e' stato riproposto
+                * e possiamo iniziare nuovamente
+                */
+                $this->start_timestamp = null;
             }
         }
+
+        $this->compute_countdowns();
 
         $this->rand = new MyRand($this->secret . '_' . $this->matricola);
         $this->answers = [];
@@ -732,6 +738,12 @@ function get_compito($exam, $user) {
     $response['instructions_html'] = $exam->instructions_html;  
     $response['file_list'] = $exam->get_files_list();
 
+    if ($exam->check_students && $exam->student===null) {
+        $response['ok'] = False;
+        $response['error'] = "Non risulti iscritto a questo esame (matricola ". $exam->matricola . ")";
+        return $response;
+    }
+
     if ($exam->start_timestamp !== null || array_get($user, 'is_admin') || $exam->publish_text) {
         // lo studente ha iniziato (e forse anche finito) l'esame
         // oppure siamo admin
@@ -746,7 +758,6 @@ function get_compito($exam, $user) {
             }
         $response['text'] = $exam->text;
         $response['seconds_to_finish'] = $exam->seconds_to_finish;
-        $response['matricola'] = $exam->matricola;
 
         $answers = [];
         $obj = $exam->read('submit', False);
@@ -891,18 +902,10 @@ try {
             if ($action == 'login') throw new ResponseError("utente non riconosciuto o password non valida");
             throw new ResponseError("utente non autenticato");
         }
-
         if ($action === 'logout') {
             session_destroy();   
             $user = null;
             $response = ['ok' => True];
-        } else if ($action === 'csv_download') {
-            if (!$user['is_admin']) throw new ResponseError("user not authorized");
-            header('Content-Type: text/csv');
-            header('Content-Disposition: attachment; filename="'.$exam_id.'.csv";');
-            $fp = fopen('php://output', 'w');
-            $exam->csv_response($fp);
-            fclose($fp);
         } else if ($action === 'reload' || $action === 'load') {
             $matricola = $user['matricola'];
             if ($user['is_admin']) {
@@ -917,23 +920,26 @@ try {
             $response = get_compito($exam, $user);
         } else if ($action === 'start') {
             $matricola = $user['matricola'];
-            $exam->start();
             $exam->compose_for($matricola);
-            $exam->write($user, 'start', True); /* segnamo l'inizio del compito */
+            if (!$exam->is_open) throw new ResponseError("l'esame non è aperto");
+            if ($exam->check_students && $exam->student === null) throw new ResponseError("lo studente non è iscritto");
+            $exam->start($user);
             $response = get_compito($exam, $user);
         } else if ($action === 'submit') {
             $response = submit($exam, $user);
-        } else if ($action === 'get_students') {
-            $response = [
-                'ok' => True,
-                'students' => $exam->get_student_list()
-            ];
         } else if ($action === 'pdf_upload') {
+            $file = $_FILES['file'];
+            if ($file['error'] > 0) {
+                my_log("php file upload error code: " . $file['error']);
+                my_log("file upload size: " . $file['size']);
+                throw new ResponseError("errore caricamento file (error code: " . $file['error'] . ")");
+            } 
+            error_log("PDF_UPLOAD: " . json_encode($file));
             $now = new DateTime('NOW');
             $matricola = $user["matricola"];
             $exam->compose_for($matricola);
             $filename = $exam->storage_path . "/" . $matricola . "_" . $now->format('c') . ".pdf";
-            $r = move_uploaded_file($_FILES["file"]["tmp_name"], $filename);
+            $r = move_uploaded_file($file["tmp_name"], $filename);
             if ($r) {
                 $hash = md5_file($filename);
                 my_log("upload " . $filename. " md5 hash " . $hash);
@@ -986,6 +992,18 @@ try {
                     'error' => 'nome file non valido'
                 ];
             }
+        } else if ($action === 'csv_download') {
+            if (!$user['is_admin']) throw new ResponseError("user not authorized");
+            header('Content-Type: text/csv');
+            header('Content-Disposition: attachment; filename="'.$exam_id.'.csv";');
+            $fp = fopen('php://output', 'w');
+            $exam->csv_response($fp);
+            fclose($fp);
+        } else if ($action === 'get_students') {
+            $response = [
+                'ok' => True,
+                'students' => $exam->get_student_list()
+            ];
         } else {
             error_log("richiesta non valida");
             throw new ResponseError("richiesta non valida");
@@ -1020,7 +1038,6 @@ my_log("GET ".$exam->exam_id);
     <script src="https://code.jquery.com/jquery-3.5.0.min.js" integrity="sha256-xNzN2a4ltkB44Mc/Jz3pT4iU1cmeR0FkXs4pru/JxaQ=" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.2.0/jspdf.umd.min.js" integrity="sha512-YnVU8b8PyEw7oHtil6p9au8k/Co0chizlPltAwx25CMWX6syRiy24HduUeWi/WpBbJh4Y4562du0CHAlvnUeeQ==" crossorigin="anonymous"></script>
     <script>
-        var user_authenticated = <?= $user !== null ? "true" : "false" ?>;
         <?php echo file_get_contents(__DIR__ . '/exam.js')?> 
     </script>
     <style>
