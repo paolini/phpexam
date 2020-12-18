@@ -738,10 +738,12 @@ function get_compito($exam, $user) {
     $response['instructions_html'] = $exam->instructions_html;  
     $response['file_list'] = $exam->get_files_list();
 
-    if ($exam->check_students && $exam->student===null) {
-        $response['ok'] = False;
-        $response['error'] = "Non risulti iscritto a questo esame (matricola ". $exam->matricola . ")";
-        return $response;
+    if (!array_get($user, 'is_admin')) { // verifica che lo studente sia iscritto
+        if ($exam->check_students && $exam->student===null) {
+            $response['ok'] = False;
+            $response['error'] = "Non risulti iscritto a questo esame (matricola ". $exam->matricola . ")";
+            return $response;
+        }
     }
 
     if ($exam->start_timestamp !== null || array_get($user, 'is_admin') || $exam->publish_text) {
