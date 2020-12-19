@@ -205,7 +205,92 @@ function main_compose_admin(data) {
     );
 }
 
+function main_compose_answer_log(data) {
+    const logs = data.answers_log;
+    $log = $("#log");
+    $log.empty();
+    if (logs.length == 0) {
+        return;
+    }
+
+    $log.append($("<p>Modifiche alle risposte:</p>\n"));
+    var keys = [];
+    // find all used keys
+    for (var i=0; i<logs.length; ++i) {
+        const answers = logs[i].answers;
+        for (var j=0; j<answers.length; ++j) {
+            const key = answers[j].id;
+            if (!keys.includes(key)) keys.push(key);
+        }
+    }
+    var $table = $("<table></table>");
+    var $tr = $("<tr></tr>");
+    $tr.append($("<th>istante</th>"));
+    for (var i=0; i<keys.length; ++i) {
+        var $th = $("<th></th>");
+        $th.text(keys[i].replace('_', ' '));
+        $tr.append($th);
+    }
+    $table.append($tr);
+    for (var i=0;i<logs.length; ++i) {
+        const log = logs[i];
+        $tr = $("<tr></tr>");
+        var $td = $("<td></td>");
+        $td.text(timestamp_to_string(new Date(log.timestamp*1000)));
+        $tr.append($td);
+        for (var j=0; j<keys.length; ++j) {
+            var k;
+            for (k=0; k<log.answers.length && log.answers[k].id != keys[j]; ++k);
+            $td = $("<td></td>");
+            if (log.answers[k].id == keys[j]) {
+                $td.text(log.answers[k].answer);
+            }
+            $tr.append($td);
+        }
+        $table.append($tr);
+    }
+    $log.append($table);
+}
+
+function main_compose_text_timer(data) {
+    $("#timer").empty();
+    if (data.seconds_to_finish !== null) {
+        if (data.seconds_to_finish > 0) {
+            var target_time = Date.now() + 1000*data.seconds_to_finish;
+            stop_timer();
+            timer = window.setInterval(function() {
+                var s = Math.round((target_time - Date.now())/1000);
+                if (s<0) s = 0;
+                var color = "";
+                if (s < 60) color = "red";
+                else if (s< 5*60) color = "orange";
+                else color = "blue";
+                $("#timer").html("<span style='color:" + color + "'>Tempo rimanente: " + seconds_to_human_string(s) + "</span>");
+                if (s <= 0) {
+                    $("#timer").html("<span style='color:" + color + "'>Tempo scaduto</span>");
+                    $("#submit").hide();
+                    $("input.exam").attr('readonly', 'readonly');
+                    stop_timer();
+                }
+            }, 1000);
+        } else {
+            $("#submit").hide();
+            if (data.can_be_repeated) {
+                $restart_button = $("<button>ricomincia</button>");
+                $restart_button.click(function() {load('start');});
+                $("#timer").empty();
+                $("#timer").append($restart_button);
+            } else {
+                $("#timer").html("<span style='color:red'>non è possibile inviare le risposte</span>");
+            }
+            $("input.exam").attr('readonly', 'readonly');
+        }
+    }
+}
+
 function main_compose_text(data) {
+    main_compose_answer_log(data);
+
     $("#upload").show();
     $("#legenda").show();
     var $exercises = $("#exercises");
@@ -252,6 +337,7 @@ function main_compose_text(data) {
         $exercises.append("<br /><br />");
     });
     MathJax.Hub.Queue(["Typeset",MathJax.Hub]);
+
     $("#submit").show().off('click').click(function(){submit(data)});
     if (data.matricola != data.user.matricola) {
         $("#submit").hide(); // evita di inviare dati di un utente impersonificato
@@ -259,39 +345,7 @@ function main_compose_text(data) {
     }
     $("#set_matricola").val(data.matricola);
 
-    $("#timer").empty();
-    if (data.seconds_to_finish !== null) {
-        if (data.seconds_to_finish > 0) {
-            var target_time = Date.now() + 1000*data.seconds_to_finish;
-            stop_timer();
-            timer = window.setInterval(function() {
-                var s = Math.round((target_time - Date.now())/1000);
-                if (s<0) s = 0;
-                var color = "";
-                if (s < 60) color = "red";
-                else if (s< 5*60) color = "orange";
-                else color = "blue";
-                $("#timer").html("<span style='color:" + color + "'>Tempo rimanente: " + seconds_to_human_string(s) + "</span>");
-                if (s <= 0) {
-                    $("#timer").html("<span style='color:" + color + "'>Tempo scaduto</span>");
-                    $("#submit").hide();
-                    $("input.exam").attr('readonly', 'readonly');
-                    stop_timer();
-                }
-            }, 1000);
-        } else {
-            $("#submit").hide();
-            if (data.can_be_repeated) {
-                $restart_button = $("<button>ricomincia</button>");
-                $restart_button.click(function() {load('start');});
-                $("#timer").empty();
-                $("#timer").append($restart_button);
-            } else {
-                $("#timer").html("<span style='color:red'>non è possibile inviare le risposte</span>");
-            }
-            $("input.exam").attr('readonly', 'readonly');
-        }
-    }
+    main_compose_text_timer(data);
 }
 
 function main_compose_no_text(data) {
@@ -617,6 +671,9 @@ $(function(){
         upload(this, $("#upload_div_id")[0]);
     });
     $("#upload_pdf_id").click(create_pdf).hide();
+    $("#show_logs").change(function(){
+        $('#log').toggle($('#show_logs').is(":checked"));
+    }).change();
 
     load('load');
 })

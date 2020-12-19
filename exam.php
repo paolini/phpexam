@@ -793,10 +793,29 @@ function get_compito($exam, $user) {
                 $response['nome'] = array_get($user, 'nome');
             }
         }
+
         if (count($answers) === 0) {
             $answers = null; // empty array is otherwise encoded as array instead of dictionary
         }
         $response['answers'] = $answers;
+
+        $logs = [];
+        foreach($submissions as $submission) {
+            $log = [];
+            $log['timestamp'] = $submission['timestamp'];
+            $answers = [];
+            foreach($submission['submit'] as $item) {
+                array_push($answers, [
+                    'id' => array_get($item, 'id'),
+                    'form_id' => array_get($item, 'form_id'),
+                    'answer' => array_get($item, 'answer')]);
+            }
+            $log['answers'] = $answers;
+            array_push($logs, $log);
+        }
+        $answers_log = $logs;
+
+        $response['answers_log'] = $answers_log;
     }
 
     return $response;
@@ -1088,6 +1107,40 @@ input.fill {
 span.left {
     float: left;
 }
+
+table {
+    border-collapse: collapse;
+    border: 1px solid orange;
+}
+
+table td {
+    border-left: 1px solid dimgrey;
+    border-right: 1px solid dimgrey;
+    text-align: center;
+}
+
+table td:first-child {
+    border-left: none;
+}
+
+table td:last-child {
+    border-right: none;
+}
+
+table th {
+    border-left: 1px solid dimgrey;
+    border-right: 1px solid dimgrey;
+    text-align: center;
+}
+
+table th:first-child {
+    border-left: none;
+}
+
+table th:last-child {
+    border-right: none;
+}
+
     </style>
   </head>
   <body data-rsssl=1 data-rsssl=1>
@@ -1140,8 +1193,11 @@ span.left {
         <?php endif; ?>
         <div>            
             <div id="timer"></div>
-            <button id="submit" hidden>invia risposte</button> 
+            <button id="submit" hidden>invia risposte</button>
+            <input type="checkbox" id="show_logs"><label for="show_logs">mostra modifiche alle risposte</label>
             <div id="response" style="color:blue"></div>
+        </div>
+        <div id="log">
         </div>
         <div id="exercises">
         </div>
