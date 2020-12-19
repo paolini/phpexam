@@ -131,23 +131,28 @@ function submit(data) {
 }
 
 function seconds_to_human_string(s) {
-    var msg = "";
     if (s<0) {
-        msg += "-";
-        s = -s;
+        return "-" + seconds_to_human_string(-s);
     }
     var show_seconds = s < 60*5;
     var h = Math.floor(s / 3600);
     s -= h*3600;
     var m = Math.floor(s / 60);
     s -= m*60;
-    if (h>0) msg += h.toString() + (h==1 ? " ora" : " ore") + (show_seconds?", ":" e ");
-    if (h>0 || m>0) msg += m.toString() + (m==1 ? " minuto" : " minuti");
-    if (show_seconds) {
-        if (m>0) msg += " e ";
-        msg += s.toString() + (s==1 ? " secondo" : " secondi");
+    var h_msg = h.toString() + (h==1 ? " ora" : " ore");
+    var m_msg = m.toString() + (m==1 ? " minuto" : " minuti");
+    if (!show_seconds) {
+        if (h == 0) return m_msg;
+        if (m == 0) return h_msg;
+        return h_msg + " e " + m_msg;
     }
-    return msg;
+    var s_msg = s.toString() + (s==1 ? " secondo" : " secondi");
+    if (h == 0) {
+        if (m==0) return s_msg;
+        if (s==0) return m_msg;
+        return m_msg + " e " + s_msg;
+    }
+    return h_msg + ", " + m_msg + " e " + s_msg;
 }
 
 var timer = null; // global singleton timer... so we don't leak!
@@ -157,9 +162,7 @@ function stop_timer() {
     timer = null;
 }
 
-function main(data) {
-    stop_timer();
-
+function main_compose_exam_info(data) {
     $("#cognome").text(data.cognome);
     $("#nome").text(data.nome);
     $("#matricola").text(data.matricola);
@@ -169,182 +172,207 @@ function main(data) {
         $("#instructions").hide();
     }
     $("#set_matricola").val(data.matricola);
+}
+
+function main_compose_admin(data) {
+    $.post("", { action: 'get_students'}, 
+        function(response, status) {
+            $select = $('#select_student');
+            var count = 0;
+            if (response.ok) {
+                $select.empty();
+                $select.append($("<option></option>").val("").text('-- mostra tutte le varianti --'));
+                response.students.forEach(function(student) {
+                    var $option = $("<option></option>").val(student.matricola).text(student.cognome + ' ' + student.nome);
+                    if (student.matricola == data.matricola) $option.attr("selected","selected");
+                    $select.append($option);
+                    count ++;
+                });
+            } else {
+                console.log(response.error);
+            }
+            if (count > 0) {
+                $select.show();
+                $select.off("change");
+                $select.change(function() {
+                    var val = $select.val();
+                    $('#set_matricola').val(val).change();
+                });
+            } else {
+                $select.hide();
+            }            
+        }
+    );
+}
+
+function main_compose_text(data) {
+    $("#upload").show();
+    $("#legenda").show();
+    var $exercises = $("#exercises");
+    $exercises.empty();
+    $exercises.append("<br>\n");
+    if (!data.answers) data.answers = {};
+    data.text.exercises.forEach(function(exercise, i) {
+        $exercises.append("<b>Esercizio " + (exercise.number) + ":</b> " + exercise.statement + "<br />");
+        exercise.questions.forEach(function(question) {
+            var answer = "";
+            if (data.answers.hasOwnProperty(question.form_id)) {
+                answer = data.answers[question.form_id];
+            }
+            var $input = $("<input>")
+                .attr("id", 'question_' + question.form_id)
+                .attr("class", 'exam')
+                .val(answer);
+            $input.css("width","95%");
+            var $check = $("<span>").addClass('check')
+                .attr('id', 'check_' + question.form_id)
+                .html("&#9632");
+            $exercises.append(
+                $("<p></p>").addClass('left')
+                    .append($check)
+                    .append($("<i></i>").html(question.statement))
+                    .append($("<span></span>").addClass("fill").append($input))
+                );
+            if (question.solution) {
+                $exercises
+                    .append($("<span></span>").css('color','red').html(question.solution))
+                    .append($("<br />"));
+            }
+            $input.keyup(function() {
+                var val = $(this).val();
+                var submitted = data.answers[question.form_id];
+                if (submitted === undefined) submitted = '';
+                $check.css('color', val != submitted ?'red':(val=='' ? 'black' : 'green'));
+                // if (changed) $("#response").empty();            
+            }).keyup();
+            $input.change(function() {
+                submit(data);
+            })
+        });
+        $exercises.append("<br /><br />");
+    });
+    MathJax.Hub.Queue(["Typeset",MathJax.Hub]);
+    $("#submit").show().off('click').click(function(){submit(data)});
+    if (data.matricola != data.user.matricola) {
+        $("#submit").hide(); // evita di inviare dati di un utente impersonificato
+        $("input.exam").attr('readonly', 'readonly');
+    }
+    $("#set_matricola").val(data.matricola);
+
+    $("#timer").empty();
+    if (data.seconds_to_finish !== null) {
+        if (data.seconds_to_finish > 0) {
+            var target_time = Date.now() + 1000*data.seconds_to_finish;
+            stop_timer();
+            timer = window.setInterval(function() {
+                var s = Math.round((target_time - Date.now())/1000);
+                if (s<0) s = 0;
+                var color = "";
+                if (s < 60) color = "red";
+                else if (s< 5*60) color = "orange";
+                else color = "blue";
+                $("#timer").html("<span style='color:" + color + "'>Tempo rimanente: " + seconds_to_human_string(s) + "</span>");
+                if (s <= 0) {
+                    $("#timer").html("<span style='color:" + color + "'>Tempo scaduto</span>");
+                    $("#submit").hide();
+                    $("input.exam").attr('readonly', 'readonly');
+                    stop_timer();
+                }
+            }, 1000);
+        } else {
+            $("#submit").hide();
+            if (data.can_be_repeated) {
+                $restart_button = $("<button>ricomincia</button>");
+                $restart_button.click(function() {load('start');});
+                $("#timer").empty();
+                $("#timer").append($restart_button);
+            } else {
+                $("#timer").html("<span style='color:red'>non è possibile inviare le risposte</span>");
+            }
+            $("input.exam").attr('readonly', 'readonly');
+        }
+    }
+}
+
+function main_compose_no_text(data) {
+    $("#legenda").hide();
+    $("#upload").hide();
+    var $exercises = $("#exercises");
+    $exercises.empty();
+    $exercises.append("<br>\n");
+
+    function display_start_button() {
+        var html = 
+        $exercises.html("<span style='color:blue'><b>Quando sei pronto puoi <button id='start_button'>iniziare!</button></b></span>");
+        $("#start_button").click(function(){load("start");});
+        if (data.duration_minutes) {
+            $exercises.append("<p>Durata della prova " + seconds_to_human_string(data.duration_minutes*60) + ".</p>");
+        }
+        if (data.end_time) {
+            $exercises.append("<p>Da completare comunque entro le ore " + data.end_time + ".</p>");
+            if (data.seconds_to_start_timeline > 0) {
+                var target_time = Date.now() + 1000*data.seconds_to_start_timeline;
+                stop_timer();
+                var $timer = $("<span style='color:blue'></span>");
+                $exercises.append($timer);
+                timer = window.setInterval(function() {
+                    var s = Math.round((target_time - Date.now()) / 1000);
+                    if (s<0) s = 0;
+                    $timer.html("<b>Devi iniziare il compito entro " + seconds_to_human_string(s) + "</b>");
+                }, 1000);
+                window.setTimeout(function() {
+                    stop_timer();
+                    $timer.html("<b>Il compito è iniziato!</b>");
+                }, 1000*(data.seconds_to_start_timeline+1));
+            } else {
+                $exercises.append("<span style='color:red'><b>Il compito è già iniziato!</b></span>");
+            }
+        }
+    }
+    if (data.is_open) {
+        display_start_button();
+    } else {
+        if (data.seconds_to_start > 0) {
+            var target_time = Date.now() + 1000*data.seconds_to_start;
+            stop_timer();
+            timer = window.setInterval(function() {
+                var s = Math.round((target_time - Date.now()) / 1000);
+                if (s<0) s = 0;
+                $exercises.html("<span style='color:red'><b>Potrai iniziare il compito tra " + seconds_to_human_string(s) + "</b></span>");
+            }, 1000);
+            window.setTimeout(function() {
+                stop_timer();
+                display_start_button();
+            }, 1000*(data.seconds_to_start+1));
+        } else {
+            $exercises.append("<span style='color:red'><b>Non è possibile svolgere il compito in questo momento.</b></span>");
+        }
+    }
+}
+
+function main(data) {
+    stop_timer();
+
+    main_compose_exam_info(data);
+
     if (data.user.is_admin) {
         $("#admin").show();
-        $.post("", {
-            action: 'get_students'}, 
-            function(response, status) {
-                $select = $('#select_student');
-                var count = 0;
-                if (response.ok) {
-                    $select.empty();
-                    $select.append($("<option></option>").val("").text('-- mostra tutte le varianti --'));
-                    response.students.forEach(function(student) {
-                        var $option = $("<option></option>").val(student.matricola).text(student.cognome + ' ' + student.nome);
-                        if (student.matricola == data.matricola) $option.attr("selected","selected");
-                        $select.append($option);
-                        count ++;
-                    });
-                } else {
-                    console.log(response.error);
-                }
-                if (count > 0) {
-                    $select.show();
-                    $select.off("change");
-                    $select.change(function() {
-                        var val = $select.val();
-                        $('#set_matricola').val(val).change();
-                    });
-                } else {
-                    $select.hide();
-                }            
-            });
+        main_compose_admin(data);
     } else {
         $("#admin").hide();
     }
 
     $("#text").show();
-    var $exercises = $("#exercises");
-    $exercises.empty();
-    $exercises.append("<br>\n");
-    if (data.text) { // abbiamo il testo del compito!
-        $("#upload").show();
-        $("#legenda").show();
-        if (!data.answers) data.answers = {};
-        data.text.exercises.forEach(function(exercise, i) {
-            $exercises.append("<b>Esercizio " + (exercise.number) + ":</b> " + exercise.statement + "<br />");
-            exercise.questions.forEach(function(question) {
-                var answer = "";
-                if (data.answers.hasOwnProperty(question.form_id)) {
-                    answer = data.answers[question.form_id];
-                }
-                var $input = $("<input>")
-                    .attr("id", 'question_' + question.form_id)
-                    .attr("class", 'exam')
-                    .val(answer);
-                $input.css("width","95%");
-                var $check = $("<span>").addClass('check')
-                    .attr('id', 'check_' + question.form_id)
-                    .html("&#9632");
-                $exercises.append(
-                    $("<p></p>").addClass('left')
-                        .append($check)
-                        .append($("<i></i>").html(question.statement))
-                        .append($("<span></span>").addClass("fill").append($input))
-                    );
-                if (question.solution) {
-                    $exercises
-                        .append($("<span></span>").css('color','red').html(question.solution))
-                        .append($("<br />"));
-                }
-                $input.keyup(function() {
-                    var val = $(this).val();
-                    var submitted = data.answers[question.form_id];
-                    if (submitted === undefined) submitted = '';
-                    $check.css('color', val != submitted ?'red':(val=='' ? 'black' : 'green'));
-                    // if (changed) $("#response").empty();            
-                }).keyup();
-                $input.change(function() {
-                    submit(data);
-                })
-            });
-            $exercises.append("<br /><br />");
-        });
-        MathJax.Hub.Queue(["Typeset",MathJax.Hub]);
-        $("#submit").show().off('click').click(function(){submit(data)});
-        if (data.matricola != data.user.matricola) {
-            $("#submit").hide(); // evita di inviare dati di un utente impersonificato
-            $("input.exam").attr('readonly', 'readonly');
-        }
-        $("#set_matricola").val(data.matricola);
-
-        $("#timer").empty();
-        if (data.seconds_to_finish !== null) {
-            if (data.seconds_to_finish > 0) {
-                var target_time = Date.now() + 1000*data.seconds_to_finish;
-                stop_timer();
-                timer = window.setInterval(function() {
-                    var s = Math.round((target_time - Date.now())/1000);
-                    if (s<0) s = 0;
-                    var color = "";
-                    if (s < 60) color = "red";
-                    else if (s< 5*60) color = "orange";
-                    else color = "blue";
-                    $("#timer").html("<span style='color:" + color + "'>Tempo rimanente: " + seconds_to_human_string(s) + "</span>");
-                    if (s <= 0) {
-                        $("#timer").html("<span style='color:" + color + "'>Tempo scaduto</span>");
-                        $("#submit").hide();
-                        $("input.exam").attr('readonly', 'readonly');
-                        stop_timer();
-                    }
-                }, 1000);
-            } else {
-                $("#submit").hide();
-                if (data.can_be_repeated) {
-                    $restart_button = $("<button>ricomincia</button>");
-                    $restart_button.click(function() {load('start');});
-                    $("#timer").empty();
-                    $("#timer").append($restart_button);
-                } else {
-                    $("#timer").html("<span style='color:red'>non è possibile inviare le risposte</span>");
-                }
-                $("input.exam").attr('readonly', 'readonly');
-            }
-        }
+    if (data.text) { 
+        // abbiamo il testo del compito!
+        main_compose_text(data);
     } else {
         // non abbiamo il testo del compito
-        $("#legenda").hide();
-        $("#upload").hide();
+        main_compose_no_text(data);
+    }
 
-        function display_start_button() {
-            var html = 
-            $exercises.html("<span style='color:blue'><b>Quando sei pronto puoi <button id='start_button'>iniziare!</button></b></span>");
-            $("#start_button").click(function(){load("start");});
-            if (data.duration_minutes) {
-                $exercises.append("<p>Durata della prova " + seconds_to_human_string(data.duration_minutes*60) + ".</p>");
-            }
-            if (data.end_time) {
-                $exercises.append("<p>Da completare comunque entro le ore " + data.end_time + ".</p>");
-                if (data.seconds_to_start_timeline > 0) {
-                    var target_time = Date.now() + 1000*data.seconds_to_start_timeline;
-                    stop_timer();
-                    var $timer = $("<span style='color:blue'></span>");
-                    $exercises.append($timer);
-                    timer = window.setInterval(function() {
-                        var s = Math.round((target_time - Date.now()) / 1000);
-                        if (s<0) s = 0;
-                        $timer.html("<b>Devi iniziare il compito entro " + seconds_to_human_string(s) + "</b>");
-                    }, 1000);
-                    window.setTimeout(function() {
-                        stop_timer();
-                        $timer.html("<b>Il compito è iniziato!</b>");
-                    }, 1000*(data.seconds_to_start_timeline+1));
-                } else {
-                    $exercises.append("<span style='color:red'><b>Il compito è già iniziato!</b></span>");
-                }
-            }
-    }
-        if (data.is_open) {
-            display_start_button();
-        } else {
-            if (data.seconds_to_start > 0) {
-                var target_time = Date.now() + 1000*data.seconds_to_start;
-                stop_timer();
-                timer = window.setInterval(function() {
-                    var s = Math.round((target_time - Date.now()) / 1000);
-                    if (s<0) s = 0;
-                    $exercises.html("<span style='color:red'><b>Potrai iniziare il compito tra " + seconds_to_human_string(s) + "</b></span>");
-                }, 1000);
-                window.setTimeout(function() {
-                    stop_timer();
-                    display_start_button();
-                }, 1000*(data.seconds_to_start+1));
-            } else {
-                $exercises.append("<span style='color:red'><b>Non è possibile svolgere il compito in questo momento.</b></span>");
-            }
-        }
-    }
     populate_pdf_list(data.file_list, data.upload_is_open);
+    
     if (data.upload_is_open) {
         $(".upload").show();
     } else {
