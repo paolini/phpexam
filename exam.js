@@ -337,7 +337,12 @@ function main(data) {
             }
         }
     }
-    populate_pdf_list(data['file_list']);
+    populate_pdf_list(data.file_list, data.upload_is_open);
+    if (data.upload_is_open) {
+        $(".upload").show();
+    } else {
+        $(".upload").hide();
+    }
 }
 
 // upload scans
@@ -471,7 +476,7 @@ function readAsDataURL(file) {
         if (data.ok) {
             pages = [];
             $("#upload_div_id").empty();
-            populate_pdf_list(data.dir);
+            populate_pdf_list(data.dir, true);
         } else {
             $div = $("#upload_list");
             $div.append("<p style='color:red'>Errore: " + data.error + ". File non caricato</p>");
@@ -499,7 +504,7 @@ function readAsDataURL(file) {
     }
   }
   
-  function populate_pdf_list(files) {
+  function populate_pdf_list(files, show_delete_button) {
     $div = $("#upload_list");
     $div.empty();
     if (files.length == 0) {
@@ -520,28 +525,30 @@ function readAsDataURL(file) {
             post("", data, "post");
         };
         li.appendChild(a);
-        li.appendChild(document.createTextNode(" "));
-        var button = document.createElement('button');
-        button.appendChild(document.createTextNode("elimina"));
-        button.data_filename = files[i];
-        button.onclick = function() {
-            if (confirm(this.data_filename+"\nVeramente vuoi eliminare il file?")) {
-                $.post("", {
-                    action: 'pdf_delete',
-                    filename: this.data_filename
-                }).done(function(data) {
-                    if (data.ok) {
-                        pages = [];
-                        $("#upload_div_id").empty();
-                        populate_pdf_list(data.dir);            
-                    } else {
-                        $div = $("#upload_list");
-                        $div.append("<p>Errore: file non eliminato</p>");             
-                    }
-                });
+        if (show_delete_button) {
+            li.appendChild(document.createTextNode(" "));
+            var button = document.createElement('button');
+            button.appendChild(document.createTextNode("elimina"));
+            button.data_filename = files[i];
+            button.onclick = function() {
+                if (confirm(this.data_filename+"\nVeramente vuoi eliminare il file?")) {
+                    $.post("", {
+                        action: 'pdf_delete',
+                        filename: this.data_filename
+                    }).done(function(data) {
+                        if (data.ok) {
+                            pages = [];
+                            $("#upload_div_id").empty();
+                            populate_pdf_list(data.dir, data.upload_is_open);            
+                        } else {
+                            $div = $("#upload_list");
+                            $div.append("<p>Errore: file non eliminato</p>");             
+                        }
+                    });
+                }
             }
+            li.appendChild(button);
         }
-        li.appendChild(button);
         $div[0].appendChild(li);
     }
   }  

@@ -117,7 +117,7 @@ function get_user($exam) {
             if ($u !== null) {
                 $user = $u;
                 $_SESSION['user'] = $user;
-                my_log("USER LOGIN $auth OK " . $user['user']);
+                my_log("USER LOGIN $auth OK: " . json_encode($user));
                 break;
             }
         }
@@ -305,6 +305,7 @@ class Exam {
         $this->date = my_xml_get($root, 'date');
         $this->time = my_xml_get($root, 'time');
         $this->end_time = my_xml_get($root, 'end_time');
+        $this->end_upload_time = my_xml_get($root, 'end_upload_time');
         $this->duration_minutes = (int) my_xml_get($root, 'duration_minutes');
         $this->show_solutions = my_xml_get_bool($root, 'publish_solutions', False);
         $this->show_variants = False;
@@ -315,6 +316,7 @@ class Exam {
 
         $this->timestamp = my_timestamp($this->date, $this->time); // inizio della prova
         $this->end_timestamp = my_timestamp($this->date, $this->end_time); // termine massimo
+        $this->end_upload_timestamp = my_timestamp($this->date, $this->end_upload_time); // tempo massimo per il caricamento dei files
         $this->start_timeline = $this->end_timestamp - 60*$this->duration_minutes; // puoi iniziare entro questo istante senza penalita
         
         $this->storage_path = my_xml_get($root, 'storage_path', $this->exam_id);
@@ -360,6 +362,11 @@ class Exam {
             $this->is_open = False;
         }
         // error_log("IS OPEN {$this->is_open}");
+
+        $this->upload_is_open = True;
+        if ($this->end_upload_timestamp !== null && $this->now > $this->end_upload_timestamp) {
+            $this->upload_is_open = False;
+        }
 
         $this->IP = getenv('HTTP_CLIENT_IP')?:
             (getenv('HTTP_X_FORWARDED_FOR')?:
@@ -681,7 +688,7 @@ class Exam {
                     $line = trim($line);
                     if ($line === '') continue;
                     $obj = json_decode($line, True);
-                    if (!isset($obj['submit'])) continue;
+                    // if (!isset($obj['submit'])) continue;
                     $user = array_get($obj, 'user');
                     if ($user !== null) {
                         array_push($list, $user);
@@ -734,6 +741,7 @@ function get_compito($exam, $user) {
     $response['seconds_to_start'] = $exam->seconds_to_start;
     $response['seconds_to_start_timeline'] = $exam->seconds_to_start_timeline;
     $response['is_open'] = $exam->is_open;
+    $response['upload_is_open'] = $exam->upload_is_open;
     $response['ok'] = True;
     $response['instructions_html'] = $exam->instructions_html;  
     $response['file_list'] = $exam->get_files_list();
@@ -930,6 +938,9 @@ try {
         } else if ($action === 'submit') {
             $response = submit($exam, $user);
         } else if ($action === 'pdf_upload') {
+            if (! $exam->upload_is_open) {
+                throw new ResponseError("non è più possibile caricare files");
+            }
             $file = $_FILES['file'];
             if ($file['error'] > 0) {
                 my_log("php file upload error code: " . $file['error']);
@@ -939,7 +950,6 @@ try {
                 throw new ResponseError($error);
             } 
             error_log("PDF_UPLOAD: " . json_encode($file));
-            $now = new DateTime('NOW');
             $matricola = $user["matricola"];
             $exam->compose_for($matricola);
             $filename = $exam->storage_path . "/" . $matricola . "_" . $now->format('c') . ".pdf";
@@ -978,6 +988,9 @@ try {
                 ];
             }
         } else if ($action === 'pdf_delete') {
+            if (!$exam->upload_is_open) {
+                throw new ResponseError("non è più possibile rimuovere files");
+            }
             $matricola = $user['matricola'];
             $exam->compose_for($matricola);
             $filename = array_get($_POST, 'filename');
@@ -1065,6 +1078,7 @@ span.left {
       <h2><?php echo("{$exam->course}"); ?></h2>
       <h3><?php echo("{$exam->name}"); ?></h3>
       <h3><?php echo("{$exam->date}"); if ($exam->time) echo(" ore {$exam->time}"); ?></h3>
+      <?php if (in_array('fake', $exam->auth_methods)) echo ("<h2 style='color:red'>configurazione insicura!</h2>")?>
       <!--pre>
       <?php echo $exam->timestamp; ?>
       <?php echo $exam->end_timestamp; ?>
@@ -1116,17 +1130,20 @@ span.left {
         <div id="exercises">
         </div>
         <div id="upload">
-            <p>Quando hai finito il compito puoi inviare le scansioni dello svolgimento. 
+            <p class="upload">Quando hai finito il compito puoi inviare le scansioni dello svolgimento. 
             Premi sul pulsante [scegli files] per caricare un singolo file in formato PDF 
             oppure una foto di ogni pagina. 
             Le foto vanno ruotate, se necessario, prima di premere 
             sul pulsante [carica file] che provvederà a generare un unico file PDF.
             </p>
+            <p>Elenco files caricati: </p>
             <ul id="upload_list">
             </ul>
-            <input id="upload_input_id" type="file" multiple>
-            <button id="upload_pdf_id">carica file</button>
-            <div id="upload_div_id">
+            <div class="upload">
+                <input id="upload_input_id" type="file" multiple>
+                <button id="upload_pdf_id">carica file</button>
+                <div id="upload_div_id">
+                </div>
             </div>
         </div>
     </div>
