@@ -280,7 +280,14 @@ function main(data) {
                 }, 1000);
             } else {
                 $("#submit").hide();
-                $("#timer").html("<span style='color:red'>non è possibile inviare le risposte</span>");
+                if (data.can_be_repeated) {
+                    $restart_button = $("<button>ricomincia</button>");
+                    $restart_button.click(function() {load('start');});
+                    $("#timer").empty();
+                    $("#timer").append($restart_button);
+                } else {
+                    $("#timer").html("<span style='color:red'>non è possibile inviare le risposte</span>");
+                }
                 $("input.exam").attr('readonly', 'readonly');
             }
         }
@@ -298,25 +305,25 @@ function main(data) {
             }
             if (data.end_time) {
                 $exercises.append("<p>Da completare comunque entro le ore " + data.end_time + ".</p>");
-            }
-            if (data.seconds_to_start_timeline > 0) {
-                var target_time = Date.now() + 1000*data.seconds_to_start_timeline;
-                stop_timer();
-                var $timer = $("<span style='color:blue'></span>");
-                $exercises.append($timer);
-                timer = window.setInterval(function() {
-                    var s = Math.round((target_time - Date.now()) / 1000);
-                    if (s<0) s = 0;
-                    $timer.html("<b>Devi iniziare il compito entro " + seconds_to_human_string(s) + "</b>");
-                }, 1000);
-                window.setTimeout(function() {
+                if (data.seconds_to_start_timeline > 0) {
+                    var target_time = Date.now() + 1000*data.seconds_to_start_timeline;
                     stop_timer();
-                    $timer.html("<b>Il compito è iniziato!</b>");
-                }, 1000*(data.seconds_to_start_timeline+1));
-            } else {
-                $exercises.append("<span style='color:red'><b>Il compito è già iniziato!</b></span>");
+                    var $timer = $("<span style='color:blue'></span>");
+                    $exercises.append($timer);
+                    timer = window.setInterval(function() {
+                        var s = Math.round((target_time - Date.now()) / 1000);
+                        if (s<0) s = 0;
+                        $timer.html("<b>Devi iniziare il compito entro " + seconds_to_human_string(s) + "</b>");
+                    }, 1000);
+                    window.setTimeout(function() {
+                        stop_timer();
+                        $timer.html("<b>Il compito è iniziato!</b>");
+                    }, 1000*(data.seconds_to_start_timeline+1));
+                } else {
+                    $exercises.append("<span style='color:red'><b>Il compito è già iniziato!</b></span>");
+                }
             }
-        }
+    }
         if (data.is_open) {
             display_start_button();
         } else {

@@ -296,6 +296,7 @@ class Exam {
         }
     
         $root = $this->xml_root;
+        $this->now = time();
         $this->secret = my_xml_get($root, 'secret', '');
         $this->admins = my_explode(',', my_xml_get($root, 'admins', ''));
         $this->course = my_xml_get($root, 'course');
@@ -303,21 +304,25 @@ class Exam {
         $this->auth_methods = my_explode(',', my_xml_get($root, 'auth_methods', 'ldap'));
         
         $this->date = my_xml_get($root, 'date');
+        if ($this->date == 'everyday') {
+            $this->date = date("j.n.Y",$this->now);
+        }
         $this->time = my_xml_get($root, 'time');
+        if ($this->date == null) $this->time = null;
         $this->end_time = my_xml_get($root, 'end_time');
         $this->end_upload_time = my_xml_get($root, 'end_upload_time');
         $this->duration_minutes = (int) my_xml_get($root, 'duration_minutes');
+        $this->can_be_repeated = my_xml_get_bool($root, "can_be_repeated", False);
         $this->show_solutions = my_xml_get_bool($root, 'publish_solutions', False);
         $this->show_variants = False;
         $this->publish_text = my_xml_get_bool($root, "publish_text", False);
         $this->show_instructions = my_xml_get_bool($root, "show_instructions", True);
         $this->show_legenda = my_xml_get_bool($root, "show_legenda", True);
         $this->use_mustache = my_xml_get_bool($root, "use_mustache", False);
-
+        
         $this->timestamp = my_timestamp($this->date, $this->time); // inizio della prova
         $this->end_timestamp = my_timestamp($this->date, $this->end_time); // termine massimo
         $this->end_upload_timestamp = my_timestamp($this->date, $this->end_upload_time); // tempo massimo per il caricamento dei files
-        $this->start_timeline = $this->end_timestamp - 60*$this->duration_minutes; // puoi iniziare entro questo istante senza penalita
         
         $this->storage_path = my_xml_get($root, 'storage_path', $this->exam_id);
         if (substr($this->storage_path, 0, 1) !== '/') {
@@ -343,7 +348,6 @@ class Exam {
 
         $this->instructions_html = null;
         
-        $this->now = time();
         $this->is_open = True;
         $this->start_timestamp = null;
         $this->seconds_to_start = 0;
@@ -352,13 +356,19 @@ class Exam {
             $this->is_open = False;
             $this->seconds_to_start = $this->timestamp - $this->now;
         }
+        $this->start_timeline = null; 
+        if ($this->timestamp !== null && $this->duration_minutes > 0) {
+            // puoi iniziare entro questo istante senza penalita
+            $this->start_timeline = $this->end_timestamp - 60*$this->duration_minutes; 
+        }
         $this->seconds_to_start_timeline = 0;
-        if ($this->timestamp && $this->now < $this->start_timeline) {
+        if ($this->start_timeline && $this->now < $this->start_timeline) {
             // puoi iniziare senza penalita'
             $this->seconds_to_start_timeline = $this->start_timeline - $this->now;
         }
         // error_log("END_TIMESTAMP {$this->end_timestamp} {$this->now}");
         if ($this->end_timestamp && $this->now > $this->end_timestamp) {
+            // il tempo e' scaduto
             $this->is_open = False;
         }
         // error_log("IS OPEN {$this->is_open}");
@@ -473,10 +483,11 @@ class Exam {
 
         // determina l'istante di inizio effettivo del compito 
         // per questo studente
-        $start = $this->read('start', False); // attenzione: non bisogna permettere di rifare uno start, prendiamo l'ultimo
-        if ($start === null) {
+        $start_list = $this->read('start'); // attenzione: non bisogna permettere di rifare uno start, prendiamo l'ultimo
+        if (count($start_list) == 0) {
             $this->start_timestamp = null;
         } else {
+            $start = $start_list[count($start_list) - 1];
             $this->start_timestamp = $start['timestamp'];
             if ($this->timestamp !== null && $this->timestamp > $this->start_timestamp) {
                 /*
@@ -598,11 +609,11 @@ class Exam {
         return $timestamp;
     } 
 
-    function read($action,$first=True) {
+    function read($action) {
         if (!isset($this->storage_filename)) throw new Exception('Call Exam::login before Exam::write');
         // error_log(">>>reading " . $this->storage_filename . "\n");
-        $found = null;
-        if (!file_exists($this->storage_filename)) return $found;
+        $lst = [];
+        if (!file_exists($this->storage_filename)) return $lst;
         $fp = fopen($this->storage_filename, "rt");
         if ($fp === False) throw new Exception('Cannot read file ' . $this->storage_filename);
         while(True) {
@@ -612,13 +623,12 @@ class Exam {
             if ($line === "") continue;
             $obj = json_decode($line, True);
             if (isset($obj[$action])) {
-                $found = $obj;
-                if ($first) break; // find first line 
+                $obj['timestamp'] = DateTime::createFromFormat(DateTime::ATOM,$obj['timestamp'])->getTimestamp();
+                array_push($lst, $obj);
             }
         }
         fclose($fp);
-        if ($found !== null) $found['timestamp'] = DateTime::createFromFormat(DateTime::ATOM,$found['timestamp'])->getTimestamp();
-        return $found;
+        return $lst;
         }
 
     function csv_response($fp_handle) {
@@ -742,6 +752,7 @@ function get_compito($exam, $user) {
     $response['seconds_to_start_timeline'] = $exam->seconds_to_start_timeline;
     $response['is_open'] = $exam->is_open;
     $response['upload_is_open'] = $exam->upload_is_open;
+    $response['can_be_repeated'] = $exam->can_be_repeated;
     $response['ok'] = True;
     $response['instructions_html'] = $exam->instructions_html;  
     $response['file_list'] = $exam->get_files_list();
@@ -757,8 +768,8 @@ function get_compito($exam, $user) {
     if ($exam->start_timestamp !== null || array_get($user, 'is_admin') || $exam->publish_text) {
         // lo studente ha iniziato (e forse anche finito) l'esame
         // oppure siamo admin
-        // in tal caso possiamo mostrare il compito
         // oppure è stato dichiarato un testo pubblico
+        // in tal caso possiamo mostrare il compito
         if ($exam->is_open && !array_get($user, 'is_admin')) {
             // logga gli accessi durante il compito
             $exam->write($user, "compito", [
@@ -770,8 +781,9 @@ function get_compito($exam, $user) {
         $response['seconds_to_finish'] = $exam->seconds_to_finish;
 
         $answers = [];
-        $obj = $exam->read('submit', False);
-        if ($obj !== null) {
+        $submissions = $exam->read('submit');
+        if (count($submissions) > 0) {
+            $obj = $submissions[count($submissions) - 1];
             foreach($obj['submit'] as $item) {
                 $answers[$item['form_id']] = $item['answer'];
             }
@@ -933,6 +945,10 @@ try {
             $exam->compose_for($matricola);
             if (!$exam->is_open) throw new ResponseError("l'esame non è aperto");
             if ($exam->check_students && $exam->student === null) throw new ResponseError("lo studente non è iscritto");
+            if ($exam->start_timestamp && !$exam->can_be_repeated) {
+                // l'esame era già stato avviato!
+                throw new ResponseError("l'esame è già stato avviato");
+            }
             $exam->start($user);
             $response = get_compito($exam, $user);
         } else if ($action === 'submit') {
@@ -969,24 +985,6 @@ try {
                     'error' => 'upload fallito'
                 ];
             }
-        } else if ($action === 'pdf_download') {
-            $matricola = $user['matricola'];
-            if ($user['is_admin']) {
-                $matricola = array_get($_POST, 'matricola', $matricola);
-            }
-            $exam->compose_for($matricola);
-            $filename = array_get($_POST, 'filename');
-            if ($exam->pdf_filename_is_valid($filename)) {
-                $filename = $exam->storage_path . "/" . $filename;
-                header("Content-type: application/pdf");
-                // Send the file to the browser.
-                readfile($filename);
-            } else {
-                $response = [
-                    'ok' => False,
-                    'error' => 'non autorizzato'
-                ];
-            }
         } else if ($action === 'pdf_delete') {
             if (!$exam->upload_is_open) {
                 throw new ResponseError("non è più possibile rimuovere files");
@@ -1007,6 +1005,24 @@ try {
                 $response = [
                     'ok' => False,
                     'error' => 'nome file non valido'
+                ];
+            }
+        } else if ($action === 'pdf_download') {
+            $matricola = $user['matricola'];
+            if ($user['is_admin']) {
+                $matricola = array_get($_POST, 'matricola', $matricola);
+            }
+            $exam->compose_for($matricola);
+            $filename = array_get($_POST, 'filename');
+            if ($exam->pdf_filename_is_valid($filename)) {
+                $filename = $exam->storage_path . "/" . $filename;
+                header("Content-type: application/pdf");
+                // Send the file to the browser.
+                readfile($filename);
+            } else {
+                $response = [
+                    'ok' => False,
+                    'error' => 'non autorizzato'
                 ];
             }
         } else if ($action === 'csv_download') {
