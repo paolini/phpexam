@@ -225,7 +225,7 @@ function main_compose_answer_log(data) {
     }
     var $table = $("<table></table>");
     var $tr = $("<tr></tr>");
-    $tr.append($("<th>istante</th>"));
+    $tr.append($("<th>istante</th><th>minuti</th>"));
     for (var i=0; i<keys.length; ++i) {
         var $th = $("<th></th>");
         $th.text(keys[i].replace('_', ' '));
@@ -237,6 +237,9 @@ function main_compose_answer_log(data) {
         $tr = $("<tr></tr>");
         var $td = $("<td></td>");
         $td.text(timestamp_to_string(new Date(log.timestamp*1000)));
+        $tr.append($td);
+        $td = $("<td></td>");
+        $td.text(Math.floor(log.seconds / 60));
         $tr.append($td);
         for (var j=0; j<keys.length; ++j) {
             var k;

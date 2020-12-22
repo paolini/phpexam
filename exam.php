@@ -454,7 +454,7 @@ class Exam {
     }
 
     function compose_for($matricola) {
-        my_log("compose_for $matricola timestamp " . $this->timestamp);
+        // my_log("compose_for $matricola timestamp " . $this->timestamp);
         $this->matricola = $matricola;
         $this->storage_filename = $this->storage_path . "/" . $matricola . ".jsons";
         $this->student = null;
@@ -803,6 +803,7 @@ function get_compito($exam, $user) {
         foreach($submissions as $submission) {
             $log = [];
             $log['timestamp'] = $submission['timestamp'];
+            $log['seconds'] = $submission['timestamp'] - $exam->start_timestamp;
             $answers = [];
             foreach($submission['submit'] as $item) {
                 array_push($answers, [
@@ -816,6 +817,10 @@ function get_compito($exam, $user) {
         $answers_log = $logs;
 
         $response['answers_log'] = $answers_log;
+
+        my_log("SHOWING text ". $exam->exam_id . " for " . $exam->matricola . " to " . $user['matricola']);
+    } else {
+        my_log("PREPARING exam ". $exam->exam_id . " for " . $user['matricola']);
     }
 
     return $response;
@@ -936,7 +941,7 @@ if ($action == 'login' && $user != null) {
 <?php
 try {
     try {
-        my_log("POST ".$action." ".$exam->exam_id." ".array_get($user, 'user', 'user not authenticated'));
+        my_log("POST ".$action." ".$exam->exam_id." ".array_get($user, 'matricola', 'user not authenticated'));
         // error_log("POST ".$action." ".$exam->exam_id." ".array_get($user, 'user', 'user not authenticated'));
         $response = null;
         if ($user == null) {
