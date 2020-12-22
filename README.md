@@ -79,13 +79,19 @@ sull'esame.
 
 * *name:* nome della prova 
 
-* *date:* data nel formato gg.mm.aaaa
+* *date:* data nel formato "gg.mm.aaaa". Il valore "everyday" assegna 
+la data in cui si accede alla pagina. Default: null.
 
-* *time:* ora di inizio nel formato hh:mm
+* *time:* ora di inizio nel formato hh:mm. Non viene considerato se non 
+si specifica anche "date".
 
 * *duration_minutes:* durata della prova
 
 * *end_time:* ora in cui la prova viene chiusa
+
+* *end_upload_time:* ora in cui viene chiuso il caricamento dei files
+
+* *can_be_repeated:* permette allo studente di riavviare l'esame a piacere (utile per gli esami di prova)
 
 * *secret:* chiave utilizzata per generare le varianti
 
@@ -106,6 +112,11 @@ va usata solo per lo sviluppo in quanto accetta qualunque username e password.
 * *show_legenda:* mostra la legenda. Default: true
 
 * *students_csv:* nome di un file csv contenente una riga di intestazione e poi una riga per ogni studente. Ci deve essere una colonna con intestazione "matricola". Nelle \<instructions> sarà allora possibile fare riferimento ai campi relativi allo studente. Se ad esempio si inserisce una colonna "nome" si potrà ottenere il valore di quel campo con la sintassi {{ student['nome'] }}
+
+* *csv_delimiter:* carattere utilizzato per la separazione dei campi 
+nel file csv.
+
+* *check_students:* se abilitato solo gli studenti presenti nel file csv possono svolgere il compito. Default: false
 
 * *\<exam>:* la radice del file xml
 
