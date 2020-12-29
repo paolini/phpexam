@@ -2,12 +2,13 @@
 <exam 
     course='Nome di un bel corso'  
     name='Prova scritta di esempio'
-    duration_minutes='5'
+    date='everyday'
+    duration_minutes='1'
     secret='shhht!' 
     admins='admin'
-    storage_path='example-storage'
-    auth_methods='ldap'
-    auth_methods_='ldap,fake'
+    storage_path='var/example'
+    auth_methods='fake'
+    can_be_repeated='true'
 >
     <instructions format='html'>
     Questo è un esame di prova. 

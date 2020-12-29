@@ -2,7 +2,12 @@
 
 date_default_timezone_set('Europe/Rome');
 
+// server should keep session data for AT LEAST 5 hour
+ini_set('session.gc_maxlifetime', 5 * 60 * 60);
+// each client should remember their session id for EXACTLY 5 hour
+session_set_cookie_params(5 * 60 * 60);
 session_start();
+
 
 function my_log($msg) 
 {
@@ -101,35 +106,6 @@ function fake_authenticate($username, $password) {
     ];
 }
 
-function get_user($exam) {
-    $action = array_get($_POST, 'action');
-    $user = null;
-    
-    if ($action == 'login') {
-        $username = array_get($_POST, 'user');
-        $password = array_get($_POST, 'password');
-        // my_log("get_user " . $username);
-        foreach($exam->auth_methods as $auth) {
-            $u = null;
-            if ($auth === 'ldap') $u = authenticate($username, $password);
-            else if ($auth === 'fake') $u = fake_authenticate($username, $password);
-            else throw new Exception("invalid authentication method $auth");
-            if ($u !== null) {
-                $user = $u;
-                $_SESSION['user'] = $user;
-                my_log("USER LOGIN $auth OK: " . json_encode($user));
-                break;
-            }
-        }
-    } else {
-        $user = array_get($_SESSION, 'user', null);
-    }
-
-    if ($user != null) {
-        $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
-    }
-    return $user;
-}
 
 function my_int32($x) {
     # Get the 32 least significant bits.
@@ -832,7 +808,7 @@ function submit($exam, $user) {
     $response['ok'] = False;
     if ($user === null) {
         $response['message'] = "utente non autenticato!";
-        return;
+        return $response;
     }
 
     $matricola = $user['matricola'];
@@ -897,6 +873,151 @@ class ResponseError extends Exception {
     }
 }
 
+function respond($action, $exam, $user) {
+    my_log("POST ".$action." ".$exam->exam_id." ".array_get($user, 'matricola', 'user not authenticated'));
+    // error_log("POST ".$action." ".$exam->exam_id." ".array_get($user, 'user', 'user not authenticated'));
+    if ($user == null) {
+        if ($action == 'login') throw new ResponseError("utente non riconosciuto o password non valida");
+        else if ($action == 'load') {
+            // if the user loads the page and there is no open session
+            // there is no authentication and no error
+            return [
+                'ok' => True,
+                'user' => null // require authentication
+            ];
+        }
+        throw new ResponseError("utente non autenticato");
+    }
+
+    if ($action === 'logout') {
+        session_destroy();   
+        $user = null;
+        return ['ok' => True];
+    } else if ($action === 'reload' || $action === 'load' || $action == 'login') {
+        $matricola = $user['matricola'];
+        if ($user['is_admin']) {
+            $matricola = array_get($_POST, 'matricola', '');
+            if (array_get($_POST, 'solutions') === 'true') $exam->show_solutions = True;
+            if (array_get($_POST, 'variants') === 'true') $exam->show_variants = True;
+            $exam->compose_for($matricola);  
+        } else {
+            // non admins cannot inspect variations
+            $exam->compose_for($matricola);
+        }
+        return get_compito($exam, $user);
+    } else if ($action === 'start') {
+        $matricola = $user['matricola'];
+        $exam->compose_for($matricola);
+        if (!$exam->is_open) throw new ResponseError("l'esame non è aperto");
+        if ($exam->check_students && $exam->student === null) throw new ResponseError("lo studente non è iscritto");
+        if ($exam->start_timestamp && !$exam->can_be_repeated) {
+            // l'esame era già stato avviato!
+            throw new ResponseError("l'esame è già stato avviato");
+        }
+        $exam->start($user);
+        return get_compito($exam, $user);
+    } else if ($action === 'submit') {
+        return submit($exam, $user);
+    } else if ($action === 'pdf_upload') {
+        if (! $exam->upload_is_open) {
+            throw new ResponseError("non è più possibile caricare files");
+        }
+        $file = $_FILES['file'];
+        if ($file['error'] > 0) {
+            my_log("php file upload error code: " . $file['error']);
+            my_log("file upload size: " . $file['size']);
+            $error = "Errore nel caricamento file (error code: " . $file['error'] . ")";
+            if ($file['error'] == UPLOAD_ERR_INI_SIZE) $error = "il file è troppo grosso";
+            throw new ResponseError($error);
+        } 
+        error_log("PDF_UPLOAD: " . json_encode($file));
+        $now = new DateTime('NOW');
+        $matricola = $user["matricola"];
+        $exam->compose_for($matricola);
+        $filename = $exam->storage_path . "/" . $matricola . "_" . $now->format('c') . ".pdf";
+        $r = move_uploaded_file($file["tmp_name"], $filename);
+        if ($r) {
+            $hash = md5_file($filename);
+            my_log("upload " . $filename. " md5 hash " . $hash);
+            $dir = $exam->get_files_list();
+            return [
+                'ok' => True,
+                'dir' => $dir
+                ];
+        } else {
+            my_log("upload " . $filename . " failed");
+            return [
+                'ok' => False,
+                'error' => 'upload fallito'
+            ];
+        }
+    } else if ($action === 'pdf_delete') {
+        if (!$exam->upload_is_open) {
+            throw new ResponseError("non è più possibile rimuovere files");
+        }
+        $matricola = $user['matricola'];
+        $exam->compose_for($matricola);
+        $filename = array_get($_POST, 'filename');
+        my_log("REMOVE FILE " . $filename);
+        if ($exam->pdf_filename_is_valid($filename)) {
+            $filename = $exam->storage_path . "/" . $filename;
+            unlink($filename);
+            $dir = $exam->get_files_list();
+            return [
+                'ok' => True,
+                'dir' => $dir
+            ];
+        } else {
+            return [
+                'ok' => False,
+                'error' => 'nome file non valido'
+            ];
+        }
+    } else if ($action === 'pdf_download') {
+        $matricola = $user['matricola'];
+        if ($user['is_admin']) {
+            $matricola = array_get($_POST, 'matricola', $matricola);
+        }
+        $exam->compose_for($matricola);
+        $filename = array_get($_POST, 'filename');
+        if ($exam->pdf_filename_is_valid($filename)) {
+            $filename = $exam->storage_path . "/" . $filename;
+            header("Content-type: application/pdf");
+            // Send the file to the browser.
+            readfile($filename);
+            return null;
+        } else {
+            return [
+                'ok' => False,
+                'error' => 'non autorizzato'
+            ];
+        }
+    } else if ($action === 'csv_download') {
+        if (!$user['is_admin']) throw new ResponseError("user not authorized");
+        header('Content-Type: text/csv');
+        header('Content-Disposition: attachment; filename="'.$exam.exam_id.'.csv";');
+        $fp = fopen('php://output', 'w');
+        $exam->csv_response($fp);
+        fclose($fp);
+        return null;
+    } else if ($action === 'get_students') {
+        return [
+            'ok' => True,
+            'students' => $exam->get_student_list()
+        ];
+    } else {
+        error_log("richiesta non valida [$action]");
+        if (empty($_FILES) && empty($_POST)) {
+                // catch file overload error...
+                $postMax = ini_get('post_max_size'); //grab the size limits...
+                throw new ResponseError("richiesta non valida (il server limita la dimensione massima degli upload a: $postMax)");
+        }
+        throw new ResponseError("richiesta non valida");
+    }
+    // should never reach here
+    throw new AssertionError("internal error #47895");
+}
+
 /*******************************
  * EXECUTION STARTS HERE       *
  *******************************/
@@ -930,141 +1051,46 @@ try {
     exit();
 }
 
-$action = array_get($_POST, 'action');
-$user = get_user($exam);
-if ($action == 'login' && $user != null) {
-    $action = 'load';
+function login($username, $password) {
+
 }
+
+$action = array_get($_POST, 'action');
+
+//$_SESSION['user'] = null; // test session timeout
+
+$user = array_get($_SESSION, 'user', null);
+if ($action == 'login') {
+    $user = null;
+    $username = array_get($_POST, 'user');
+    $password = array_get($_POST, 'password');
+    // my_log("get_user " . $username);
+    foreach($exam->auth_methods as $auth) {
+        $u = null;
+        if ($auth === 'ldap') $u = authenticate($username, $password);
+        else if ($auth === 'fake') $u = fake_authenticate($username, $password);
+        else throw new Exception("invalid authentication method $auth");
+        if ($u !== null) {
+            $user = $u;
+            $_SESSION['user'] = $user;
+            my_log("USER LOGIN $auth OK: " . json_encode($user));
+            break;
+        }
+    }
+} 
+
+if ($user != null) {
+    $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
+}
+
 ?>
 
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
+
 <?php
 try {
     try {
-        my_log("POST ".$action." ".$exam->exam_id." ".array_get($user, 'matricola', 'user not authenticated'));
-        // error_log("POST ".$action." ".$exam->exam_id." ".array_get($user, 'user', 'user not authenticated'));
-        $response = null;
-        if ($user == null) {
-            if ($action == 'login') throw new ResponseError("utente non riconosciuto o password non valida");
-            throw new ResponseError("utente non autenticato");
-        }
-        if ($action === 'logout') {
-            session_destroy();   
-            $user = null;
-            $response = ['ok' => True];
-        } else if ($action === 'reload' || $action === 'load') {
-            $matricola = $user['matricola'];
-            if ($user['is_admin']) {
-                $matricola = array_get($_POST, 'matricola', '');
-                if (array_get($_POST, 'solutions') === 'true') $exam->show_solutions = True;
-                if (array_get($_POST, 'variants') === 'true') $exam->show_variants = True;
-                $exam->compose_for($matricola);  
-            } else {
-                // non admins cannot inspect variations
-                $exam->compose_for($matricola);
-            }
-            $response = get_compito($exam, $user);
-        } else if ($action === 'start') {
-            $matricola = $user['matricola'];
-            $exam->compose_for($matricola);
-            if (!$exam->is_open) throw new ResponseError("l'esame non è aperto");
-            if ($exam->check_students && $exam->student === null) throw new ResponseError("lo studente non è iscritto");
-            if ($exam->start_timestamp && !$exam->can_be_repeated) {
-                // l'esame era già stato avviato!
-                throw new ResponseError("l'esame è già stato avviato");
-            }
-            $exam->start($user);
-            $response = get_compito($exam, $user);
-        } else if ($action === 'submit') {
-            $response = submit($exam, $user);
-        } else if ($action === 'pdf_upload') {
-            if (! $exam->upload_is_open) {
-                throw new ResponseError("non è più possibile caricare files");
-            }
-            $file = $_FILES['file'];
-            if ($file['error'] > 0) {
-                my_log("php file upload error code: " . $file['error']);
-                my_log("file upload size: " . $file['size']);
-                $error = "Errore nel caricamento file (error code: " . $file['error'] . ")";
-                if ($file['error'] == UPLOAD_ERR_INI_SIZE) $error = "il file è troppo grosso";
-                throw new ResponseError($error);
-            } 
-            error_log("PDF_UPLOAD: " . json_encode($file));
-            $matricola = $user["matricola"];
-            $exam->compose_for($matricola);
-            $filename = $exam->storage_path . "/" . $matricola . "_" . $now->format('c') . ".pdf";
-            $r = move_uploaded_file($file["tmp_name"], $filename);
-            if ($r) {
-                $hash = md5_file($filename);
-                my_log("upload " . $filename. " md5 hash " . $hash);
-                $dir = $exam->get_files_list();
-                $response = [
-                    'ok' => True,
-                    'dir' => $dir
-                    ];
-            } else {
-                my_log("upload " . $filename . " failed");
-                $response = [
-                    'ok' => False,
-                    'error' => 'upload fallito'
-                ];
-            }
-        } else if ($action === 'pdf_delete') {
-            if (!$exam->upload_is_open) {
-                throw new ResponseError("non è più possibile rimuovere files");
-            }
-            $matricola = $user['matricola'];
-            $exam->compose_for($matricola);
-            $filename = array_get($_POST, 'filename');
-            my_log("REMOVE FILE " . $filename);
-            if ($exam->pdf_filename_is_valid($filename)) {
-                $filename = $exam->storage_path . "/" . $filename;
-                unlink($filename);
-                $dir = $exam->get_files_list();
-                $response = [
-                    'ok' => True,
-                    'dir' => $dir
-                ];
-            } else {
-                $response = [
-                    'ok' => False,
-                    'error' => 'nome file non valido'
-                ];
-            }
-        } else if ($action === 'pdf_download') {
-            $matricola = $user['matricola'];
-            if ($user['is_admin']) {
-                $matricola = array_get($_POST, 'matricola', $matricola);
-            }
-            $exam->compose_for($matricola);
-            $filename = array_get($_POST, 'filename');
-            if ($exam->pdf_filename_is_valid($filename)) {
-                $filename = $exam->storage_path . "/" . $filename;
-                header("Content-type: application/pdf");
-                // Send the file to the browser.
-                readfile($filename);
-            } else {
-                $response = [
-                    'ok' => False,
-                    'error' => 'non autorizzato'
-                ];
-            }
-        } else if ($action === 'csv_download') {
-            if (!$user['is_admin']) throw new ResponseError("user not authorized");
-            header('Content-Type: text/csv');
-            header('Content-Disposition: attachment; filename="'.$exam_id.'.csv";');
-            $fp = fopen('php://output', 'w');
-            $exam->csv_response($fp);
-            fclose($fp);
-        } else if ($action === 'get_students') {
-            $response = [
-                'ok' => True,
-                'students' => $exam->get_student_list()
-            ];
-        } else {
-            error_log("richiesta non valida");
-            throw new ResponseError("richiesta non valida");
-        }
+        $response = respond($action, $exam, $user);
         if ($response !== null) {
             header('Content-Type: application/json');
             echo json_encode($response);
@@ -1179,7 +1205,8 @@ table th:last-child {
         <div id="user_div">
             <b>Cognome:</b> <span id="cognome"></span> <br />
             <b>Nome:</b> <span id="nome"></span> <br />
-            <b>Matricola:</b> <span id="matricola"></span> <button id="logout">logout</button><br />        </div>
+            <b>Matricola:</b> <span id="matricola"></span> <button id="logout">logout</button><br />        
+        </div>
         <div id="admin" hidden>
             <b>riservato agli amministratori:</b><br/>
             mostra soluzioni: <input id="show_solutions" type="checkbox" checked><br />

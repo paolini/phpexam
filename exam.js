@@ -37,6 +37,15 @@ function post(path, params, method='post') {
     form.submit();
   }
 
+/**
+ * ask user to login again and then execute the callback next()
+ */
+function reauthenticate(next) {
+    error("sessione scaduta devi inserire le credenziali");
+    $("#auth").show();
+    pending = next;
+}
+
 function load(action) {
     var post = {};
     if (action == 'login') {
@@ -53,28 +62,31 @@ function load(action) {
         post.variants = true;
     }
     clean_error();
-    $.post("", post, function(data, status) {
-        if (!data.ok) {
-            if (action != 'load') {
+    return $.post("", post, function(data, status) {
+        if (data.user == undefined) data.user = null; // normalize
+        if (data.ok) { 
+            if (action == 'login' && pending != null) {
+                // execute pending action that failed because of session timeout
+                var f = pending;
+                pending = null;
+                return f();
+            }
+            if (action == 'logout') {
+                error("La sessione è stata chiusa");
+            }
+        } else { // not data.ok
+            if (data.user == null) {
+                // invalid user: maybe the session is terminated
+                // try to authenticate again and then
+                // retry the same action
+                reauthenticate(function() {
+                    load(action);
+                });
+            } else {
                 error(data.error || "errore interno 243");
             }
-            return;
         }
-        if (action == 'logout') {
-            $("#admin").hide();
-            $("#text").hide();
-            $("#auth_error").text("").show();
-            $("#auth").show();
-            $("#response").empty();
-        } else {
-            if (data.user == null) {
-                error("errore interno 231");
-                return;
-            }
-            $("#auth_error").text("").hide();
-            $("#auth").hide();
-            main(data);
-        }
+        return main(data);
     });
 }
 
@@ -99,15 +111,14 @@ function submit(data) {
             new_answers[question.form_id] = val;
         })
     });
-    
-    $.post("", post, function(response, status) {
+    clean_error();
+    return $.post("", post, function(response, status) {
         if (response.user != null) {
-            $("#auth_error").text("").hide();
             $("#auth").hide();
         } else {
-            $("#auth_error").text("errore interno #231").show();
-            $("#auth_error").show();
-            $("#auth").show();
+            reauthenticate(function() {
+                submit(data)
+            });
         }
         if (response.message) {
             msg = response.message;
@@ -189,7 +200,7 @@ function main_compose_admin(data) {
                     count ++;
                 });
             } else {
-                console.log(response.error);
+                error(response.error);
             }
             if (count > 0) {
                 $select.show();
@@ -278,13 +289,13 @@ function main_compose_text_timer(data) {
             }, 1000);
         } else {
             $("#submit").hide();
+            $("#timer").html("<span style='color:red'>non è possibile inviare le risposte</span>");
             if (data.can_be_repeated) {
                 $restart_button = $("<button>ricomincia</button>");
                 $restart_button.click(function() {load('start');});
-                $("#timer").empty();
+                $("#timer").append("&nbsp;");
                 $("#timer").append($restart_button);
             } else {
-                $("#timer").html("<span style='color:red'>non è possibile inviare le risposte</span>");
             }
             $("input.exam").attr('readonly', 'readonly');
         }
@@ -409,6 +420,16 @@ function main_compose_no_text(data) {
 
 function main(data) {
     stop_timer();
+
+    if (data.user == undefined || data.user == null) {
+        $("#auth").show();
+        $("#admin").hide();
+        $("#text").hide();
+        return;
+    }
+    $("#auth").hide();
+
+    if (!data.ok) return; // don't change anything on the page!
 
     main_compose_exam_info(data);
 
@@ -646,7 +667,7 @@ function readAsDataURL(file) {
   }  
 
 // MAIN
-
+var pending = null; // azione rimasta in sospeso da svolgere dopo il login
 
 $(function(){
     $("#login").click(function() {
