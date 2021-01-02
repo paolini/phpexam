@@ -217,18 +217,18 @@ function main_compose_admin(data) {
 }
 
 function main_compose_answer_log(data) {
-    const logs = data.answers_log;
+    const submissions = data.submissions;
     $log = $("#log");
     $log.empty();
-    if (logs.length == 0) {
+    if (submissions.length == 0) {
         return;
     }
 
     $log.append($("<p>Modifiche alle risposte:</p>\n"));
     var keys = [];
     // find all used keys
-    for (var i=0; i<logs.length; ++i) {
-        const answers = logs[i].answers;
+    for (var i=0; i<submissions.length; ++i) {
+        const answers = submissions[i].answers;
         for (var j=0; j<answers.length; ++j) {
             const key = answers[j].id;
             if (!keys.includes(key)) keys.push(key);
@@ -243,8 +243,8 @@ function main_compose_answer_log(data) {
         $tr.append($th);
     }
     $table.append($tr);
-    for (var i=0;i<logs.length; ++i) {
-        const log = logs[i];
+    for (var i=0;i<submissions.length; ++i) {
+        const log = submissions[i];
         $tr = $("<tr></tr>");
         var $td = $("<td></td>");
         $td.text(timestamp_to_string(new Date(log.timestamp*1000)));

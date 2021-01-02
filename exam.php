@@ -289,7 +289,29 @@ class Text {
             }
         }
 
-        $this->compute_countdowns();
+        // compute countdowns
+        $this->seconds_to_finish = null;
+        if ($this->start_timestamp !== null) {
+            // calcola il tempo che manca alla fine del compito
+            // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
+
+            if ($this->exam->duration_minutes !== null) {
+                $this->seconds_to_finish = $this->start_timestamp + $this->exam->duration_minutes * 60 - $this->exam->now;
+            }
+
+            // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
+            // non deve superare il tempo massimo
+            if ($this->exam->end_timestamp !== null) {
+                $s = $this->exam->end_timestamp - $this->exam->now;
+                if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
+                    $this->seconds_to_finish = $s;
+                }
+            }
+
+            if ($this->seconds_to_finish !== null && $this->seconds_to_finish <=0) {
+                $this->seconds_to_finish = 0;
+            }
+        }
 
         $this->instructions = null;
         $this->instructions_html = null;
@@ -319,35 +341,42 @@ class Text {
             foreach ($lst as $exercise) {
                 array_push($this->exercises, $exercise);
             }
-        }    
-    }    
+        }
 
-    function compute_countdowns() {
-        $this->seconds_to_finish = null;
-        if ($this->start_timestamp !== null) {
-            // calcola il tempo che manca alla fine del compito
-            // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
-
-            if ($this->exam->duration_minutes !== null) {
-                $this->seconds_to_finish = $this->start_timestamp + $this->exam->duration_minutes * 60 - $this->exam->now;
-            }
-
-            // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
-            // non deve superare il tempo massimo
-            if ($this->exam->end_timestamp !== null) {
-                $s = $this->exam->end_timestamp - $this->exam->now;
-                if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
-                    $this->seconds_to_finish = $s;
+        $this->submissions = $exam->read($matricola, 'submit');
+        if (count($this->submissions) > 0) {
+            $obj = $this->submissions[count($this->submissions) - 1];
+            // ultima risposta
+            foreach($obj['submit'] as $item) {
+                foreach($this->exercises as &$exercise) {
+                    foreach ($exercise['questions'] as &$question) {
+                        if ($question['form_id'] == $item['form_id']) {
+                            $question['answer'] = $item['answer'];
+                        }
+                    }
                 }
             }
-
-            if ($this->seconds_to_finish !== null && $this->seconds_to_finish <=0) {
-                $this->seconds_to_finish = 0;
+            $submit_user = array_get($obj, 'user');
+            if ($submit_user !== null) {
+                $this->cognome = array_get($submit_user, 'cognome');
+                $this->nome = array_get($submit_user, 'nome');
             }
         }
-    }
+        foreach($this->submissions as &$submission) {
+            $submission['seconds'] = $submission['timestamp'] - $this->start_timestamp;
+            $answers = [];
+            foreach($submission['submit'] as $item) {
+                array_push($answers, [
+                    'id' => array_get($item, 'id'),
+                    'form_id' => array_get($item, 'form_id'),
+                    'exercise_id' => array_get($item, 'exercise_id'),
+                    'answer' => array_get($item, 'answer')]);
+            }
+            $submission['answers'] = $answers;
+        }
+    }    
 
-    function recurse_compose_exercises($tree, $context=null) {
+    private function recurse_compose_exercises($tree, $context=null) {
         if ($context === null) {
             $context = new stdClass();
             $context->exercise_count = 0;
@@ -629,7 +658,7 @@ class Exam {
         $this->http_user_agent = array_get($_SERVER, 'HTTP_USER_AGENT');
 
         $this->tree = xml_recurse_parse($root);
-        // $this->answers = $this->tree['answers'];
+        // $this->answers = $this->tree['answers'];    
     }
 
     function load_students_csv($csv_filename) {
@@ -710,63 +739,28 @@ class Exam {
         return $lst;
         }
 
-    function csv_response($fp_handle, $history=false) {
-        $dir = new DirectoryIterator($this->storage_path);
-        $headers = ["timestamp", "minuti", "matricola", "cognome", "nome", "azione"];
+    function csv_response($fp_handle, $history=true) {
+        $students = $this->get_student_list();
+        $headers = ["timestamp", "minuti", "matricola", "cognome", "nome"];
         fputcsv($fp_handle, $headers);
-        foreach ($dir as $fileinfo) {
-            $filename = $fileinfo->getFilename();
-            $pathinfo = pathinfo($filename);
-            if ($pathinfo['extension'] === 'jsons') {
-                $matricola = $pathinfo['filename'];
-                $storage_filename = $this->storage_filename($matricola);
-                $fp = fopen($storage_filename, "rt");
-                if ($fp === False) throw new Exception('Cannot read file ' . $storage_filename);
-                $row = null;
-                $start_timestamp = null;
-                while(True) {
-                    $line = fgets($fp);
-                    if ($line === False) break; // EOF
-                    $line = trim($line);
-                    if ($line === '') continue;
-                    $obj = json_decode($line, True);
-                    if (isset($obj['submit']) || isset($obj['start'])) {
-                        // error_log("object " . json_encode($obj));
-                        if (isset($obj['start']) || $start_timestamp === null) {
-                            $start_timestamp = $obj['timestamp'];
-                        }
-                        $minutes = ($obj['timestamp'] - $start_timestamp) / 60;
-                        $row = [
-                            $obj['timestamp'],
-                            $minutes,
-                            $obj['user']['matricola'],
-                            $obj['user']['cognome'],
-                            $obj['user']['nome']
-                        ];
-                        if (isset($obj['submit'])) {
-                            $submit = $obj['submit'];
-                            if (count($submit) !== count($this->answers)) {
-                                // number of answer have been modified after submission
-                                array_push($row,'mismatch');
-                                // throw new Exception("data mismatch");
-                            } else {
-                                array_push($row,'submit');
-                            }
-                            for ($i=0; $i < count($submit) ; $i ++) {
-                                $submit[$i]['exercise_id'] = $this->answers[$i]['exercise_id'];
-                            }
-                            usort($submit, function($a, $b){ return $a['id'] < $b['id']?-1:1;});
-                            foreach($submit as $ans) {
-                                array_push($row, $ans['exercise_id'], $ans['id'], $ans['answer']);
-                            }
-                        } else {
-                            array_push($row,'start');
-                        }
-                        fputcsv($fp_handle, $row);
-                    }
+        foreach ($students as $student) {
+            $text = new Text($this, $student['matricola'], true, true);
+            foreach($text->submissions as $submission) {
+                $row = [
+                    $submission['timestamp'],
+                    round($submission['seconds'] / 60),
+                    $text->matricola,
+                    $text->cognome,
+                    $text->nome,
+                ];
+                foreach ($submission['answers'] as $answer) {
+                    error_log("answer: ".json_encode($answer));
+                    array_push($row, $answer['exercise_id'], $answer['id'], $answer['answer']);
                 }
+                fputcsv($fp_handle, $row);
             }
         }
+
     }
 
     function get_student_list() {
@@ -867,45 +861,7 @@ function get_compito($text, $user) {
             }
         $response['text'] = ['exercises' => $text->exercises];
         $response['seconds_to_finish'] = $text->seconds_to_finish;
-
-        $answers = [];
-        $submissions = $exam->read($text->matricola, 'submit');
-        if (count($submissions) > 0) {
-            $obj = $submissions[count($submissions) - 1];
-            foreach($obj['submit'] as $item) {
-                foreach($response['text']['exercises'] as &$exercise) {
-                    foreach ($exercise['questions'] as &$question) {
-                        if ($question['form_id'] == $item['form_id']) {
-                            $question['answer'] = $item['answer'];
-                        }
-                    }
-                }
-            }
-            $submit_user = array_get($obj, 'user');
-            if ($submit_user !== null) {
-                $response['cognome'] = array_get($submit_user, 'cognome');
-                $response['nome'] = array_get($submit_user, 'nome');
-            }
-        }
-
-        $logs = [];
-        foreach($submissions as $submission) {
-            $log = [];
-            $log['timestamp'] = $submission['timestamp'];
-            $log['seconds'] = $submission['timestamp'] - $text->start_timestamp;
-            $answers = [];
-            foreach($submission['submit'] as $item) {
-                array_push($answers, [
-                    'id' => array_get($item, 'id'),
-                    'form_id' => array_get($item, 'form_id'),
-                    'answer' => array_get($item, 'answer')]);
-            }
-            $log['answers'] = $answers;
-            array_push($logs, $log);
-        }
-        $answers_log = $logs;
-
-        $response['answers_log'] = $answers_log;
+        $response['submissions'] = $text->submissions;
 
         my_log("SHOWING text ". $exam->exam_id . " for " . $text->matricola . " to " . $user['matricola']);
     } else {
@@ -1116,6 +1072,7 @@ function respond($action, $exam, $user) {
         if (!$user['is_admin']) throw new ResponseError("user not authorized");
         header('Content-Type: text/csv');
         header('Content-Disposition: attachment; filename="'.$exam->exam_id.'.csv";');
+        ob_clean(); // clear blank lines caused by PHP parsing file
         $fp = fopen('php://output', 'w');
         $exam->csv_response($fp);
         fclose($fp);
