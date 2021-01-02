@@ -806,13 +806,15 @@ class Exam {
         return $lst;
         }
 
-    function csv_response($fp_handle, $history=true) {
+    function csv_response($fp_handle, $with_log=true) {
         $students = $this->get_student_list();
         $headers = ["timestamp", "minuti", "matricola", "cognome", "nome"];
         fputcsv($fp_handle, $headers);
         foreach ($students as $student) {
             $text = new Text($this, $student['matricola'], true, true);
-            foreach($text->submissions as $submission) {
+            $submissions = $text->submissions;
+            if (!$with_log) $submissions = array_slice($submissions, -1);
+            foreach($submissions as $submission) {
                 $row = [
                     $submission['timestamp'],
                     round($submission['seconds'] / 60),
@@ -820,9 +822,11 @@ class Exam {
                     $text->cognome,
                     $text->nome,
                 ];
-                foreach ($submission['answers'] as $answer) {
-                    error_log("answer: ".json_encode($answer));
-                    array_push($row, $answer['exercise_id'], $answer['id'], $answer['answer']);
+                $answers = array_get($submission, 'answers');
+                if ($answers != null) {
+                    foreach ($answers as $answer) {
+                        array_push($row, $answer['exercise_id'], $answer['id'], $answer['answer']);
+                    }
                 }
                 fputcsv($fp_handle, $row);
             }
@@ -1075,12 +1079,15 @@ function respond($action, $exam, $user) {
             ];
         }
     } else if ($action === 'csv_download') {
+        $with_log = (array_get($_POST, 'with_log') == '1');
+        error_log("with_log: " . $with_log);
+        error_log("POST: " . json_encode($_POST));
         if (!$user['is_admin']) throw new ResponseError("user not authorized");
         header('Content-Type: text/csv');
         header('Content-Disposition: attachment; filename="'.$exam->exam_id.'.csv";');
         ob_clean(); // clear blank lines caused by PHP parsing file
         $fp = fopen('php://output', 'w');
-        $exam->csv_response($fp);
+        $exam->csv_response($fp, $with_log);
         fclose($fp);
         return null;
     } else if ($action === 'get_students') {

@@ -429,10 +429,11 @@ function main(data) {
         $("#text").hide();
         return;
     }
-    $("#auth").hide();
-
+    
     if (!data.ok) return; // don't change anything on the page!
 
+    $("#auth").hide();
+    
     main_compose_exam_info(data);
 
     if (data.user.is_admin) {
@@ -691,9 +692,8 @@ $(function(){
         load('reload')
     });
     $("#csv_download").click(function() {
-        post("", {
-            action: 'csv_download'            
-        },"POST");
+        post("", { action: 'csv_download',
+                   with_log: $("#show_logs").is(":checked") ? '1' : '0'}, 'POST');
     });
     $("#upload_input_id").change(function() {
         $("#upload_pdf_id").hide();
