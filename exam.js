@@ -103,12 +103,10 @@ function submit(data) {
     var post = {};
     post.action = "submit";
 
-    var new_answers = {};
     data.text.exercises.forEach(function(exercise) {
         exercise.questions.forEach(function(question) {
             var val = $("#question_" + question.form_id).val();
             post[question.form_id] = val;
-            new_answers[question.form_id] = val;
         })
     });
     clean_error();
@@ -128,7 +126,13 @@ function submit(data) {
             $("#response").text(msg);
         }
         if (response.ok == true) {
-            data.answers = new_answers;
+            data.text.exercises.forEach(function(exercise) {
+                exercise.questions.forEach(function(question) {
+                    question.answer = $("#question_" + question.form_id).val();
+                });
+            });
+            data.submissions = response.submissions;
+            main_compose_answer_log(data);
         } else {
             $("#response").css("color", "red");
         }
@@ -221,6 +225,7 @@ function main_compose_answer_log(data) {
     $log = $("#log");
     $log.empty();
     if (submissions.length == 0) {
+        $log.append($("<p>Non ci sono risposte</p>\n"));
         return;
     }
 
@@ -229,6 +234,7 @@ function main_compose_answer_log(data) {
     // find all used keys
     for (var i=0; i<submissions.length; ++i) {
         const answers = submissions[i].answers;
+        if (answers == null) continue; // era lo start
         for (var j=0; j<answers.length; ++j) {
             const key = answers[j].id;
             if (!keys.includes(key)) keys.push(key);
@@ -250,14 +256,16 @@ function main_compose_answer_log(data) {
         $td.text(timestamp_to_string(new Date(log.timestamp*1000)));
         $tr.append($td);
         $td = $("<td></td>");
-        $td.text(Math.floor(log.seconds / 60));
+        $td.text(Math.round(log.seconds / 60));
         $tr.append($td);
         for (var j=0; j<keys.length; ++j) {
-            var k;
-            for (k=0; k<log.answers.length && log.answers[k].id != keys[j]; ++k);
             $td = $("<td></td>");
-            if (log.answers[k].id == keys[j]) {
-                $td.text(log.answers[k].answer);
+            var answers = log.answers == null ? [] : log.answers;
+            for (var k=0; k < answers.length; ++k) {
+                if (answers[k].id == keys[j]) {
+                    $td.text(answers[k].answer);
+                    break;
+                }
             }
             $tr.append($td);
         }
@@ -303,8 +311,6 @@ function main_compose_text_timer(data) {
 }
 
 function main_compose_text(data) {
-    main_compose_answer_log(data);
-
     $("#upload").show();
     $("#legenda").show();
     var $exercises = $("#exercises");
@@ -439,9 +445,12 @@ function main(data) {
     $("#text").show();
     if (data.text) { 
         // abbiamo il testo del compito!
+        main_compose_answer_log(data);
         main_compose_text(data);
+        $("#submit_div").show();
     } else {
         // non abbiamo il testo del compito
+        $("#submit_div").hide();
         main_compose_no_text(data);
     }
 

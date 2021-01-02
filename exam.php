@@ -274,12 +274,11 @@ class Text {
 
         // determina l'istante di inizio effettivo del compito 
         // per questo studente
-        $start_list = $exam->read($matricola, 'start'); // attenzione: non bisogna permettere di rifare uno start, prendiamo l'ultimo
-        if (count($start_list) == 0) {
+        $submissions = $exam->read_submissions($matricola);
+        if (count($submissions) == 0) {
             $this->start_timestamp = null;
         } else {
-            $start = $start_list[count($start_list) - 1];
-            $this->start_timestamp = $start['timestamp'];
+            $this->start_timestamp = $submissions[0]['timestamp'];
             if ($exam->timestamp !== null && $exam->timestamp > $this->start_timestamp) {
                 /*
                 * se l'ultimo start e' anteriore alla data di inizio il compito e' stato riproposto
@@ -342,12 +341,38 @@ class Text {
                 array_push($this->exercises, $exercise);
             }
         }
+        // error_log("exercises: ".json_encode($this->exercises));
 
-        $this->submissions = $exam->read($matricola, 'submit');
-        if (count($this->submissions) > 0) {
-            $obj = $this->submissions[count($this->submissions) - 1];
-            // ultima risposta
-            foreach($obj['submit'] as $item) {
+        $this->submissions = [];
+        $last_submit = null;
+        $last_user = null;
+        foreach($submissions as $submission) {
+            $row = [
+                'timestamp' => $submission['timestamp'],
+                'seconds' => $submission['timestamp'] - $this->start_timestamp,
+                'answers' => null,
+            ];
+            $last_user = array_get($submission, 'user');
+            $last_submit = array_get($submission, 'submit');
+            if ($last_submit !== null) {
+                $row['answers'] = [];
+                foreach($last_submit as $item) {
+                    array_push($row['answers'], [
+                        'id' => array_get($item, 'id'),
+                        'form_id' => array_get($item, 'form_id'),
+                        'exercise_id' => array_get($item, 'exercise_id'),
+                        'answer' => array_get($item, 'answer')]);
+                }
+            }
+            array_push($this->submissions, $row);
+        }
+        if ($last_user !== null) {
+            $this->cognome = array_get($last_user, 'cognome');
+            $this->nome = array_get($last_user, 'nome');
+        }
+        if ($last_submit !== null) {
+            // inserisci l'ultima risposta nel testo del compito
+            foreach($last_submit as $item) {
                 foreach($this->exercises as &$exercise) {
                     foreach ($exercise['questions'] as &$question) {
                         if ($question['form_id'] == $item['form_id']) {
@@ -356,24 +381,8 @@ class Text {
                     }
                 }
             }
-            $submit_user = array_get($obj, 'user');
-            if ($submit_user !== null) {
-                $this->cognome = array_get($submit_user, 'cognome');
-                $this->nome = array_get($submit_user, 'nome');
-            }
         }
-        foreach($this->submissions as &$submission) {
-            $submission['seconds'] = $submission['timestamp'] - $this->start_timestamp;
-            $answers = [];
-            foreach($submission['submit'] as $item) {
-                array_push($answers, [
-                    'id' => array_get($item, 'id'),
-                    'form_id' => array_get($item, 'form_id'),
-                    'exercise_id' => array_get($item, 'exercise_id'),
-                    'answer' => array_get($item, 'answer')]);
-            }
-            $submission['answers'] = $answers;
-        }
+
     }    
 
     private function recurse_compose_exercises($tree, $context=null) {
@@ -422,6 +431,7 @@ class Text {
                 array_push($questions,
                     [
                         'type' => 'question',
+                        'id' => $question['id'],
                         'form_id' => $form_id,
                         'statement' => $question['statement'],
                         'solution' => ($this->show_solutions ? $question['solution'] : null),
@@ -438,6 +448,58 @@ class Text {
             return [$exercise];
         }
     }
+
+    function response_for($user) {
+        $text = $this;
+        $exam = $text->exam;
+        $response = [];
+        $response['user'] = $user;
+        $response['matricola'] = $text->matricola;
+        $response['cognome'] = array_get($user, 'cognome');
+        $response['nome'] = array_get($user, 'nome');
+        $response['timestamp'] = $exam->timestamp;
+        $response['end_timestamp'] = $exam->end_timestamp;
+        $response['end_time'] = $exam->end_time;
+        $response['duration_minutes'] = $exam->duration_minutes;
+        $response['seconds_to_start'] = $exam->seconds_to_start;
+        $response['seconds_to_start_timeline'] = $exam->seconds_to_start_timeline;
+        $response['is_open'] = $exam->is_open;
+        $response['upload_is_open'] = $exam->upload_is_open;
+        $response['can_be_repeated'] = $exam->can_be_repeated;
+        $response['ok'] = True;
+        $response['instructions_html'] = $text->instructions_html;  
+        $response['file_list'] = $exam->get_files_list($text->matricola);
+    
+        if (!array_get($user, 'is_admin')) { // verifica che lo studente sia iscritto
+            if ($exam->check_students && $text->student===null) {
+                $response['ok'] = False;
+                $response['error'] = "Non risulti iscritto a questo esame (matricola ". $text->matricola . ")";
+                return $response;
+            }
+        }
+    
+        if ($text->start_timestamp !== null || array_get($user, 'is_admin') || $exam->publish_text) {
+            // lo studente ha iniziato (e forse anche finito) l'esame
+            // oppure siamo admin
+            // oppure è stato dichiarato un testo pubblico
+            // in tal caso possiamo mostrare il compito
+            if ($exam->is_open && !array_get($user, 'is_admin')) {
+                // logga gli accessi durante il compito
+                $exam->write($text->matricola, $user, "compito", [
+                    'exercises' => $text->exercises
+                    ]);
+                }
+            $response['text'] = ['exercises' => $text->exercises];
+            $response['seconds_to_finish'] = $text->seconds_to_finish;
+            $response['submissions'] = $text->submissions;
+    
+            my_log("SHOWING text ". $exam->exam_id . " for " . $text->matricola . " to " . $user['matricola']);
+        } else {
+            my_log("PREPARING exam ". $exam->exam_id . " for " . $user['matricola']);
+        }
+    
+        return $response;
+    }    
 }
 
 function xml_recurse_parse($xml, $context=null) {
@@ -717,7 +779,7 @@ class Exam {
         return $timestamp;
     } 
 
-    function read($matricola, $action) {
+    function read_submissions($matricola) {
         $storage_filename = $this->storage_filename($matricola);
         // error_log(">>>reading " . $storage_filename . "\n");
         $lst = [];
@@ -730,8 +792,13 @@ class Exam {
             $line = trim($line);
             if ($line === "") continue;
             $obj = json_decode($line, True);
-            if (isset($obj[$action])) {
+            if (isset($obj['timestamp'])) {
                 $obj['timestamp'] = DateTime::createFromFormat(DateTime::ATOM,$obj['timestamp'])->getTimestamp();
+            }
+            if (isset($obj['start'])) {
+                $lst = [];
+                array_push($lst, $obj);
+            } else if (isset($obj['submit'])) {
                 array_push($lst, $obj);
             }
         }
@@ -820,83 +887,21 @@ class Exam {
     }
 }
 
-function get_compito($text, $user) {
-    $exam = $text->exam;
-    $response = [];
-    $response['user'] = $user;
-    $response['matricola'] = $text->matricola;
-    $response['cognome'] = array_get($user, 'cognome');
-    $response['nome'] = array_get($user, 'nome');
-    $response['timestamp'] = $exam->timestamp;
-    $response['end_timestamp'] = $exam->end_timestamp;
-    $response['end_time'] = $exam->end_time;
-    $response['duration_minutes'] = $exam->duration_minutes;
-    $response['seconds_to_start'] = $exam->seconds_to_start;
-    $response['seconds_to_start_timeline'] = $exam->seconds_to_start_timeline;
-    $response['is_open'] = $exam->is_open;
-    $response['upload_is_open'] = $exam->upload_is_open;
-    $response['can_be_repeated'] = $exam->can_be_repeated;
-    $response['ok'] = True;
-    $response['instructions_html'] = $text->instructions_html;  
-    $response['file_list'] = $exam->get_files_list($text->matricola);
-
-    if (!array_get($user, 'is_admin')) { // verifica che lo studente sia iscritto
-        if ($exam->check_students && $text->student===null) {
-            $response['ok'] = False;
-            $response['error'] = "Non risulti iscritto a questo esame (matricola ". $text->matricola . ")";
-            return $response;
-        }
-    }
-
-    if ($text->start_timestamp !== null || array_get($user, 'is_admin') || $exam->publish_text) {
-        // lo studente ha iniziato (e forse anche finito) l'esame
-        // oppure siamo admin
-        // oppure è stato dichiarato un testo pubblico
-        // in tal caso possiamo mostrare il compito
-        if ($exam->is_open && !array_get($user, 'is_admin')) {
-            // logga gli accessi durante il compito
-            $exam->write($text->matricola, $user, "compito", [
-                'exercises' => $text->exercises
-                ]);
-            }
-        $response['text'] = ['exercises' => $text->exercises];
-        $response['seconds_to_finish'] = $text->seconds_to_finish;
-        $response['submissions'] = $text->submissions;
-
-        my_log("SHOWING text ". $exam->exam_id . " for " . $text->matricola . " to " . $user['matricola']);
-    } else {
-        my_log("PREPARING exam ". $exam->exam_id . " for " . $user['matricola']);
-    }
-
-    return $response;
-}
 
 function submit($exam, $user) {
-    $response = [];
-    $response['user'] = $user;
-    $response['ok'] = False;
-    if ($user === null) {
-        $response['message'] = "utente non autenticato!";
-        return $response;
-    }
+    if ($user === null) return ['ok' => false, 'message' => "utente non autenticato!" ];
 
     $matricola = $user['matricola'];
     $is_admin = array_get($user, 'is_admin');
 
-    if ($is_admin) {
-        $matricola = array_get($_POST, 'matricola', $matricola);
-    }
+    if ($is_admin) $matricola = array_get($_POST, 'matricola', $matricola);
 
     $text = new Text($exam, $matricola, false, false);
 
     if (!$is_admin) {
-        if (!$exam->is_open) {
-            $response['message'] = "il compito è chiuso, non è possibile inviare le risposte";
-            return $response;
-        }
+        if (!$exam->is_open) return ['ok' => false, 'message' => "il compito è chiuso, non è possibile inviare le risposte"];
         if ($text->seconds_to_finish !== null && $text->seconds_to_finish <= 0) {
-            $response['message'] = "tempo scaduto, non è più possibile inviare le risposte.";
-            return $response;
+            return ['ok' => false, 'message' => "tempo scaduto, non è più possibile inviare le risposte."];
         }
     }
     
@@ -906,10 +911,7 @@ function submit($exam, $user) {
         foreach ($exercise['questions'] as $question) {
             $form_id = $question['form_id'];
             $answer = array_get($_POST, $form_id);
-            if ($answer === null) {
-                $response['message'] = 'richiesta non valida';
-                return $response;
-            }        
+            if ($answer === null) return ['ok' => false, 'message' => 'richiesta non valida'];
             array_push($answers, [
                 'id' => $question['id'],
                 'form_id' => $form_id,
@@ -918,8 +920,12 @@ function submit($exam, $user) {
             }
         }
     
-    $response['timestamp'] = $exam->write($matricola, $user, "submit", $answers);
-    $response['ok'] = True;
+    $timestamp = $exam->write($matricola, $user, 'submit', $answers);
+
+    // ricomponi il testo con le nuove risposte
+    $text = new Text($exam, $matricola, false, false);
+    $response = $text->response_for($user);
+    $response['timestamp'] = $timestamp;
     $response['message'] = "risposte inviate!";
     return $response;
 }
@@ -980,7 +986,7 @@ function respond($action, $exam, $user) {
             // non admins cannot inspect variations
             $text = new Text($exam, $matricola, false, false);
         }
-        return get_compito($text, $user);
+        return $text->response_for($user);
     } else if ($action === 'start') {
         $matricola = $user['matricola'];
         $text = new Text($exam, $matricola, false, false);
@@ -993,7 +999,7 @@ function respond($action, $exam, $user) {
         $exam->write($matricola, $user, 'start', True); /* segnamo l'inizio del compito */
         // to recompute timers
         $text = new Text($exam, $matricola, false, false);
-        return get_compito($text, $user);
+        return $text->response_for($user);
     } else if ($action === 'submit') {
         return submit($exam, $user);
     } else if ($action === 'pdf_upload') {
@@ -1300,7 +1306,7 @@ table th:last-child {
             </p>
         </div>
         <?php endif; ?>
-        <div>            
+        <div id="submit_div">       
             <div id="timer"></div>
             <button id="submit" hidden>invia risposte</button>
             <input type="checkbox" id="show_logs"><label for="show_logs">mostra modifiche alle risposte</label>
