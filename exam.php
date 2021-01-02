@@ -35,6 +35,12 @@ function array_get($array, $key, $default=null) {
     return $default;
 }
 
+function implode_ints($array) {
+    return implode(".", array_map(
+        function($n){return strval($n+1);}, 
+        $array));
+    }
+
 // Terrible hack because the SSL certificate on the Unipi side is not
 // validated by a publicy available CA.
 putenv("LDAPTLS_REQCERT=never");
@@ -257,6 +263,267 @@ function interpolate_mustache($template, $student) {
     return $m->render($template, ['student' => $student]);
 }
 
+class Text {
+    function __construct($exam, $matricola, $show_variants, $show_solutions) {
+        $this->exam = $exam;
+        $this->matricola = $matricola;
+        $this->student = null;
+        if ($exam->students !== null && $matricola) {
+            $this->student = array_get($exam->students, $matricola);
+        }
+
+        // determina l'istante di inizio effettivo del compito 
+        // per questo studente
+        $start_list = $exam->read($matricola, 'start'); // attenzione: non bisogna permettere di rifare uno start, prendiamo l'ultimo
+        if (count($start_list) == 0) {
+            $this->start_timestamp = null;
+        } else {
+            $start = $start_list[count($start_list) - 1];
+            $this->start_timestamp = $start['timestamp'];
+            if ($exam->timestamp !== null && $exam->timestamp > $this->start_timestamp) {
+                /*
+                * se l'ultimo start e' anteriore alla data di inizio il compito e' stato riproposto
+                * e possiamo iniziare nuovamente
+                */
+                $this->start_timestamp = null;
+            }
+        }
+
+        $this->compute_countdowns();
+
+        $this->instructions = null;
+        $this->instructions_html = null;
+        $instructions = $exam->tree['instructions'];
+        if ($instructions !== null && $exam->show_instructions) {
+            if ($instructions['engine'] === 'mustache') {
+                $this->instructions = interpolate_mustache($instructions['text'], $this->student);
+            } else {
+                $this->instructions = interpolate($instructions['text'], $this->student);
+            }
+            if ($instructions['format'] === 'html') { 
+                $this->instructions_html = $this->instructions;
+            } else $this->instructions_html = htmlspecialchars($this->instructions);
+        }
+        $this->instructions = $instructions;
+        // error_log("ISTRUZIONI " . $this->instructions_html);        
+
+        $this->show_variants = $show_variants;
+        $this->show_solutions = $show_solutions;
+        $this->rand = new MyRand($this->exam->secret . '_' . $this->matricola);
+        $tree = $this->exam->tree;
+        assert($tree['type'] === 'exam');
+        $this->exercises = [];
+        foreach($tree['children'] as $child) {
+            $this->form_id = 0; // incremental number used for input id in html form
+            $lst = $this->recurse_compose_exercises($child);
+            foreach ($lst as $exercise) {
+                array_push($this->exercises, $exercise);
+            }
+        }    
+    }    
+
+    function compute_countdowns() {
+        $this->seconds_to_finish = null;
+        if ($this->start_timestamp !== null) {
+            // calcola il tempo che manca alla fine del compito
+            // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
+
+            if ($this->exam->duration_minutes !== null) {
+                $this->seconds_to_finish = $this->start_timestamp + $this->exam->duration_minutes * 60 - $this->exam->now;
+            }
+
+            // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
+            // non deve superare il tempo massimo
+            if ($this->exam->end_timestamp !== null) {
+                $s = $this->exam->end_timestamp - $this->exam->now;
+                if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
+                    $this->seconds_to_finish = $s;
+                }
+            }
+
+            if ($this->seconds_to_finish !== null && $this->seconds_to_finish <=0) {
+                $this->seconds_to_finish = 0;
+            }
+        }
+    }
+
+    function recurse_compose_exercises($tree, $context=null) {
+        if ($context === null) {
+            $context = new stdClass();
+            $context->exercise_count = 0;
+        }
+        $name = $tree['type'];
+        if ($name === 'shuffle') {
+            $lst = [];
+            $children = $tree['children'];
+            if ($this->show_variants) { // don't shuffle
+                // nop
+            } else {
+                $children = $this->rand->shuffled($children);
+            }
+            foreach($children as $child) {
+                $exercises = $this->recurse_compose_exercises($child, $context);
+                foreach ($exercises as $exercise) {
+                    array_push($lst, $exercise);
+                }
+            }
+            return $lst;
+        }
+        if ($name === 'variants') {
+            if ($this->show_variants) { // show all variants
+                $lst = [];
+                foreach($tree['children'] as $child) {
+                    $exercises = $this->recurse_compose_exercises($child, $context);
+                    foreach ($exercises as $exercise) {                  
+                        array_push($lst, $exercise);
+                    }
+                }
+                return $lst;
+            } else {
+                $count = count($tree['children']);
+                $n = $this->rand->random($count);
+                return $this->recurse_compose_exercises($tree['children'][$n], $context);
+            }
+        }
+        if ($name === 'exercise') {
+            $questions = [];
+            foreach($tree['questions'] as $question) {
+                $form_id = "x_{$this->form_id}";
+                $this->form_id ++;
+                array_push($questions,
+                    [
+                        'type' => 'question',
+                        'form_id' => $form_id,
+                        'statement' => $question['statement'],
+                        'solution' => ($this->show_solutions ? $question['solution'] : null),
+                        'answer' => null,
+                    ]
+                );
+            }
+            
+            $exercise = [
+                'number' => $this->show_variants ? $tree['id'] : ++$context->exercise_count,
+                'statement' => $tree['statement'],
+                'questions' => $questions     
+            ];
+            return [$exercise];
+        }
+    }
+}
+
+function xml_recurse_parse($xml, $context=null) {
+    $name = $xml->getName();
+
+    if ($name === 'exam' && $context === null) {
+        $context = new stdClass();
+        $context->level = 'exam'; // exam or exercise
+        $context->path = [0]; // first available object counter (ramified) [2,1] means 3.2
+        $context->exercise_ids = []; // used exercise_ids
+        $context->question_ids = []; // used question_ids
+
+        $lst = [];
+        $instructions = null;
+        foreach($xml->children() as $child) {
+            $item = xml_recurse_parse($child, $context);
+            if ($item === null) continue; // to be ignored
+            if ($item['type'] == 'instructions') {
+                if ($instructions !== null) throw new ExamError("<instructions> compare più volte");
+                $instructions = $item;
+                continue;
+            }
+            array_push($lst, $item);
+        }
+        return [
+            'type' => $name, 
+            'children' => $lst, 
+            'instructions' => $instructions];
+    }
+    if ($context === null) throw new ExamError(("elemento XML <'$name'> invalido, mi aspettavo <exam>"));
+    
+    if ($name == 'shuffle') {
+        $lst = [];
+        foreach($xml->children() as $child) {
+            $item = xml_recurse_parse($child, $context);
+            if ($item === null) continue; // to be ignored
+            array_push($lst, $item);
+        }
+        return ['type' => $name, 'children' => $lst];
+    }
+    
+    if ($name === 'variants') {
+        $lst = [];
+        array_push($context->path, 0); // aggiunge una ramificazione
+        foreach($xml->children() as $child) {  
+            $item = xml_recurse_parse($child, $context);
+            if ($item === null) continue; // to be ignored
+            array_push($lst, $item);
+        }
+        array_pop($context->path);
+        $context->path[count($context->path)-1]++; // increase ramification counter
+        return ['type' => $name, 'children' => $lst];
+    }
+    
+    if ($name === 'exercise' && $context->level === 'exam') {
+        $id = my_xml_get($xml, 'id', implode_ints($context->path));
+        if (in_array($id, $context->exercise_ids)) throw new ExamError("l'id '$id' dell'esercizio è stato usato più volte");
+        array_push($context->exercise_ids, $id);
+        $obj = [
+            'type' => $name,
+            'id' => $id,
+            'statement' => trim($xml->__toString()),
+            'questions' => [],
+        ];
+        $context->level = 'exercise';
+        array_push($context->path, 0); // aggiunge ramificazione per le risposte
+        foreach($xml->children() as $item) {
+            $item = xml_recurse_parse($item, $context);
+            if ($item === null) continue;
+            $item['exercise_id'] = $id;
+            array_push($obj['questions'], $item);
+        }
+        array_pop($context->path);
+        $context->path[count($context->path)-1] ++; // increase ramification counter
+        $context->level = 'exam';
+        return $obj;
+    }
+    
+    if ($name === 'question' && $context->level === 'exercise') {
+        $id = my_xml_get($xml, 'id', implode_ints($context->path));
+        if (in_array($id, $context->question_ids)) throw new ExamError("l'id '$id' della domanda è usato più volte");
+        $context->path[count($context->path)-1] ++; // increase ramification counter 
+        array_push($context->question_ids, $id);
+        $obj = [
+            'type' => $name,
+            'id' => $id,
+            'statement' => trim((string) $xml),
+            'solution' => null,
+        ];
+        foreach($xml->children() as $child) {
+            $child_name = $child->getName();
+            if ($child_name === 'answer') {
+                if ($obj['solution'] !== null) throw new ExamError("elemento <answer> multiplo nella stessa <question>");
+                $obj['solution'] = trim((string) $child);
+            } else if (substr($child_name,-1) !== '_') {
+                throw new ExamError("elemento XML inatteso <$child_name> in <$name>");
+            }
+        }
+        return $obj;
+    }
+    
+    if ($name === 'instructions' && $context->level === 'exam') {
+        return [ 
+            'type' => $name,
+            'text' => (string) $xml,
+            'engine' => my_xml_get($xml, 'engine'),
+            'format' => my_xml_get($xml, 'format')
+        ];
+    }
+    
+    if (substr($name,-1) === '_') return null;
+    
+    throw new ExamError("elemento XML inatteso <$name> in <{$context['level']}>");
+}
+
 class Exam {
     function __construct($xml_filename, $exam_id) {
         $this->exam_id = $exam_id;
@@ -290,7 +557,6 @@ class Exam {
         $this->duration_minutes = (int) my_xml_get($root, 'duration_minutes');
         $this->can_be_repeated = my_xml_get_bool($root, "can_be_repeated", False);
         $this->show_solutions = my_xml_get_bool($root, 'publish_solutions', False);
-        $this->show_variants = False;
         $this->publish_text = my_xml_get_bool($root, "publish_text", False);
         $this->show_instructions = my_xml_get_bool($root, "show_instructions", True);
         $this->show_legenda = my_xml_get_bool($root, "show_legenda", True);
@@ -361,6 +627,9 @@ class Exam {
             (getenv('HTTP_(FORWARDED')?:
             getenv('REMOTE_ADDR')))));
         $this->http_user_agent = array_get($_SERVER, 'HTTP_USER_AGENT');
+
+        $this->tree = xml_recurse_parse($root);
+        // $this->answers = $this->tree['answers'];
     }
 
     function load_students_csv($csv_filename) {
@@ -398,181 +667,15 @@ class Exam {
         return in_array($matricola, $this->admins);
     }
 
-    function compute_countdowns() {
-        $this->seconds_to_finish = null;
-        if ($this->start_timestamp !== null) {
-            // calcola il tempo che manca alla fine del compito
-            // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
-
-            if ($this->duration_minutes !== null) {
-                $this->seconds_to_finish = $this->start_timestamp + $this->duration_minutes * 60 - $this->now;
-            }
-
-            // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
-            // non deve superare il tempo massimo
-            if ($this->end_timestamp !== null) {
-                $s = $this->end_timestamp - $this->now;
-                if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
-                    $this->seconds_to_finish = $s;
-                }
-            }
-
-            if ($this->seconds_to_finish !== null && $this->seconds_to_finish <=0) {
-                $this->seconds_to_finish = 0;
-            }
-        }
+    function storage_filename($matricola) {
+        return $this->storage_path . "/" . $matricola . ".jsons";
     }
 
-    function start($user) {
-        $this->start_timestamp = $this->now;
-        $this->write($user, 'start', True); /* segnamo l'inizio del compito */
-        $this->compute_countdowns();
-    }
-
-    function compose_for($matricola) {
-        // my_log("compose_for $matricola timestamp " . $this->timestamp);
-        $this->matricola = $matricola;
-        $this->storage_filename = $this->storage_path . "/" . $matricola . ".jsons";
-        $this->student = null;
-        if ($this->students !== null && $this->matricola) {
-            $this->student = array_get($this->students, $this->matricola);
-        }
-
-        $root = $this->xml_root;
-        $this->instructions = null;
-        $this->instructions_html = null;
-        foreach ($root as $child) {
-            if ($child->getName() === 'instructions' && $this->show_instructions) {
-                $this->instructions = (string) $child;
-                if (my_xml_get($child, 'engine') === 'mustache') {
-                    $this->instructions = interpolate_mustache($this->instructions, $this->student);
-                } else {
-                    $this->instructions = interpolate($this->instructions, $this->student);
-                }
-                if (my_xml_get($child, 'format') === 'html') { 
-                    $this->instructions_html = $this->instructions;
-                }
-                else $this->instructions_html = htmlspecialchars($this->instructions);
-            }
-        }    
-        // error_log("ISTRUZIONI " . $this->instructions_html);        
-
-        // determina l'istante di inizio effettivo del compito 
-        // per questo studente
-        $start_list = $this->read('start'); // attenzione: non bisogna permettere di rifare uno start, prendiamo l'ultimo
-        if (count($start_list) == 0) {
-            $this->start_timestamp = null;
-        } else {
-            $start = $start_list[count($start_list) - 1];
-            $this->start_timestamp = $start['timestamp'];
-            if ($this->timestamp !== null && $this->timestamp > $this->start_timestamp) {
-                /*
-                * se l'ultimo start e' anteriore alla data di inizio il compito e' stato riproposto
-                * e possiamo iniziare nuovamente
-                */
-                $this->start_timestamp = null;
-            }
-        }
-
-        $this->compute_countdowns();
-
-        $this->rand = new MyRand($this->secret . '_' . $this->matricola);
-        $this->answers = [];
-        $this->exercise_count = 0;
-        $this->variant_count = 0;
-        $this->exercise_id = null;
-        $this->text = $this->recurse_parse($this->xml_root);
-    }
-
-    function recurse_parse($xml) {
-        $name = $xml->getName();
-    //    echo("recurse_parse $name \n");
-        if ($name === 'exam') {
-            $obj = ['type' => $name];
-            $obj['exercises'] = [];
-            foreach($xml->children() as $child) {
-                $item = $this->recurse_parse($child);
-                recurse_push($obj['exercises'], $item, 'exercise');
-            }
-            return $obj;
-        }
-        if ($name === 'shuffle') {
-            $lst = [];
-            $children = $xml->children();
-            if ($this->show_variants) { // don't shuffle
-                // nop
-            } else {
-                $children = $this->rand->shuffled($children);
-            }
-            foreach($children as $child) {
-                array_push($lst, $this->recurse_parse($child));
-            }
-            return $lst;
-        }
-        if ($name === 'variants') {
-            if ($this->show_variants) { // show all variants
-                $lst = [];
-                $fix_count = $this->exercise_count;
-                foreach($xml->children() as $child) {
-                    $this->variant_count ++;
-                    $this->exercise_count = $fix_count; // fix exercise number in variants!
-                    array_push($lst, $this->recurse_parse($child));
-                }
-                $this->variant_count = 0;
-                return $lst;
-            }
-            $count = $xml->count();
-            $n = $this->rand->random($count);
-            return $this->recurse_parse($xml->children()[$n]);
-        }
-        if ($name === 'exercise') {
-            $this->exercise_id = my_xml_get($xml, 'id');
-            $obj = ['type' => $name];
-            $this->exercise_count ++;
-            $obj['number'] = "{$this->exercise_count}";
-            if ($this->variant_count>0) {
-                $obj['number'] .= ".{$this->variant_count}";
-            }
-            $obj['statement'] = trim($xml->__toString());
-            $obj['questions'] = [];
-            foreach($xml->children() as $item) {
-                $x = $this->recurse_parse($item);
-                recurse_push($obj['questions'], $x, 'question');
-            }
-            return $obj;
-        }
-        if ($name === 'question') {
-            $obj = ['type' => $name];
-            $count = count($this->answers);
-            $form_id = "x_$count";
-            $obj['form_id'] = $form_id;
-            $obj['statement'] = trim((string) $xml);
-            $answer = [];
-            $id = (string) $xml['id'];
-            $answer['id'] = $id;
-            $answer['exercise_id'] = $this->exercise_id;
-            $answer['form_id'] = $form_id;
-            foreach($xml->children() as $child) {
-                if ($child->getName() === 'answer') {
-                    $answer['solution'] = trim((string) $child);
-                    if ($this->show_solutions) {
-                        $obj['solution'] = trim((string) $child);
-                    }
-                }
-            }
-            array_push($this->answers, $answer);
-            return $obj;
-        }
-        if ($name === 'instructions') return null;
-        if (substr($name,-1) === '_') return null;
-        throw new ExamError("elemento XML inatteso <$name>");
-    }
-
-    function write($user, $action, $object) {
-        if (!isset($this->storage_filename)) throw new Exception('Call Exam::login before Exam::write');
-        // error_log("writing to file " . $this->storage_filename);
-        $fp = fopen($this->storage_filename, "at");
-        if ($fp === False) throw new Exception('Cannot write file ' + $this->storage_filename);
+    function write($matricola, $user, $action, $object) {
+        $storage_filename = $this->storage_filename($matricola);
+        // error_log("writing to file " . $storage_filename);
+        $fp = fopen($storage_filename, "at");
+        if ($fp === False) throw new Exception('Cannot write file ' + $storage_filename);
         $timestamp = date(DATE_ATOM);
         fwrite($fp, json_encode([
             'timestamp' => $timestamp,
@@ -585,13 +688,13 @@ class Exam {
         return $timestamp;
     } 
 
-    function read($action) {
-        if (!isset($this->storage_filename)) throw new Exception('Call Exam::login before Exam::write');
-        // error_log(">>>reading " . $this->storage_filename . "\n");
+    function read($matricola, $action) {
+        $storage_filename = $this->storage_filename($matricola);
+        // error_log(">>>reading " . $storage_filename . "\n");
         $lst = [];
-        if (!file_exists($this->storage_filename)) return $lst;
-        $fp = fopen($this->storage_filename, "rt");
-        if ($fp === False) throw new Exception('Cannot read file ' . $this->storage_filename);
+        if (!file_exists($storage_filename)) return $lst;
+        $fp = fopen($storage_filename, "rt");
+        if ($fp === False) throw new Exception('Cannot read file ' . $storage_filename);
         while(True) {
             $line = fgets($fp);
             if ($line === False) break; // EOF
@@ -607,16 +710,20 @@ class Exam {
         return $lst;
         }
 
-    function csv_response($fp_handle) {
+    function csv_response($fp_handle, $history=false) {
         $dir = new DirectoryIterator($this->storage_path);
+        $headers = ["timestamp", "minuti", "matricola", "cognome", "nome", "azione"];
+        fputcsv($fp_handle, $headers);
         foreach ($dir as $fileinfo) {
             $filename = $fileinfo->getFilename();
             $pathinfo = pathinfo($filename);
             if ($pathinfo['extension'] === 'jsons') {
                 $matricola = $pathinfo['filename'];
-                $this->compose_for($matricola);
-                $fp = fopen($this->storage_filename, "rt");
-                if ($fp === False) throw new Exception('Cannot read file ' . $this->storage_filename);
+                $storage_filename = $this->storage_filename($matricola);
+                $fp = fopen($storage_filename, "rt");
+                if ($fp === False) throw new Exception('Cannot read file ' . $storage_filename);
+                $row = null;
+                $start_timestamp = null;
                 while(True) {
                     $line = fgets($fp);
                     if ($line === False) break; // EOF
@@ -625,8 +732,13 @@ class Exam {
                     $obj = json_decode($line, True);
                     if (isset($obj['submit']) || isset($obj['start'])) {
                         // error_log("object " . json_encode($obj));
+                        if (isset($obj['start']) || $start_timestamp === null) {
+                            $start_timestamp = $obj['timestamp'];
+                        }
+                        $minutes = ($obj['timestamp'] - $start_timestamp) / 60;
                         $row = [
                             $obj['timestamp'],
+                            $minutes,
                             $obj['user']['matricola'],
                             $obj['user']['cognome'],
                             $obj['user']['nome']
@@ -690,8 +802,8 @@ class Exam {
         return $list;
     }
 
-    function pdf_filename_is_valid($filename) {
-        $prefix = $this->matricola . '_';
+    function pdf_filename_is_valid($filename, $matricola) {
+        $prefix = $matricola . '_';
         return substr($filename, 0, strlen($prefix)) == $prefix &&
             substr($filename, -4) == ".pdf" &&
             strpos($filename,"/") === false && 
@@ -699,11 +811,11 @@ class Exam {
             strpos($filename, " ") === false;
     }
 
-    function get_files_list() {
+    function get_files_list($matricola) {
         $files = [];
         if ($handle = opendir($this->storage_path)) {
             while (false !== ($file = readdir($handle))) {
-                if ($this->pdf_filename_is_valid($file)) {
+                if ($this->pdf_filename_is_valid($file, $matricola)) {
                     array_push($files, $file);
                 }
             }
@@ -714,10 +826,11 @@ class Exam {
     }
 }
 
-function get_compito($exam, $user) {
+function get_compito($text, $user) {
+    $exam = $text->exam;
     $response = [];
     $response['user'] = $user;
-    $response['matricola'] = $exam->matricola;
+    $response['matricola'] = $text->matricola;
     $response['cognome'] = array_get($user, 'cognome');
     $response['nome'] = array_get($user, 'nome');
     $response['timestamp'] = $exam->timestamp;
@@ -730,56 +843,56 @@ function get_compito($exam, $user) {
     $response['upload_is_open'] = $exam->upload_is_open;
     $response['can_be_repeated'] = $exam->can_be_repeated;
     $response['ok'] = True;
-    $response['instructions_html'] = $exam->instructions_html;  
-    $response['file_list'] = $exam->get_files_list();
+    $response['instructions_html'] = $text->instructions_html;  
+    $response['file_list'] = $exam->get_files_list($text->matricola);
 
     if (!array_get($user, 'is_admin')) { // verifica che lo studente sia iscritto
-        if ($exam->check_students && $exam->student===null) {
+        if ($exam->check_students && $text->student===null) {
             $response['ok'] = False;
-            $response['error'] = "Non risulti iscritto a questo esame (matricola ". $exam->matricola . ")";
+            $response['error'] = "Non risulti iscritto a questo esame (matricola ". $text->matricola . ")";
             return $response;
         }
     }
 
-    if ($exam->start_timestamp !== null || array_get($user, 'is_admin') || $exam->publish_text) {
+    if ($text->start_timestamp !== null || array_get($user, 'is_admin') || $exam->publish_text) {
         // lo studente ha iniziato (e forse anche finito) l'esame
         // oppure siamo admin
         // oppure è stato dichiarato un testo pubblico
         // in tal caso possiamo mostrare il compito
         if ($exam->is_open && !array_get($user, 'is_admin')) {
             // logga gli accessi durante il compito
-            $exam->write($user, "compito", [
-                'text' => $exam->text,
-                'answers' => $exam->answers
+            $exam->write($text->matricola, $user, "compito", [
+                'exercises' => $text->exercises
                 ]);
             }
-        $response['text'] = $exam->text;
-        $response['seconds_to_finish'] = $exam->seconds_to_finish;
+        $response['text'] = ['exercises' => $text->exercises];
+        $response['seconds_to_finish'] = $text->seconds_to_finish;
 
         $answers = [];
-        $submissions = $exam->read('submit');
+        $submissions = $exam->read($text->matricola, 'submit');
         if (count($submissions) > 0) {
             $obj = $submissions[count($submissions) - 1];
             foreach($obj['submit'] as $item) {
-                $answers[$item['form_id']] = $item['answer'];
+                foreach($response['text']['exercises'] as &$exercise) {
+                    foreach ($exercise['questions'] as &$question) {
+                        if ($question['form_id'] == $item['form_id']) {
+                            $question['answer'] = $item['answer'];
+                        }
+                    }
+                }
             }
-            $user = array_get($obj, 'user');
-            if ($user !== null) {
-                $response['cognome'] = array_get($user, 'cognome');
-                $response['nome'] = array_get($user, 'nome');
+            $submit_user = array_get($obj, 'user');
+            if ($submit_user !== null) {
+                $response['cognome'] = array_get($submit_user, 'cognome');
+                $response['nome'] = array_get($submit_user, 'nome');
             }
         }
-
-        if (count($answers) === 0) {
-            $answers = null; // empty array is otherwise encoded as array instead of dictionary
-        }
-        $response['answers'] = $answers;
 
         $logs = [];
         foreach($submissions as $submission) {
             $log = [];
             $log['timestamp'] = $submission['timestamp'];
-            $log['seconds'] = $submission['timestamp'] - $exam->start_timestamp;
+            $log['seconds'] = $submission['timestamp'] - $text->start_timestamp;
             $answers = [];
             foreach($submission['submit'] as $item) {
                 array_push($answers, [
@@ -794,7 +907,7 @@ function get_compito($exam, $user) {
 
         $response['answers_log'] = $answers_log;
 
-        my_log("SHOWING text ". $exam->exam_id . " for " . $exam->matricola . " to " . $user['matricola']);
+        my_log("SHOWING text ". $exam->exam_id . " for " . $text->matricola . " to " . $user['matricola']);
     } else {
         my_log("PREPARING exam ". $exam->exam_id . " for " . $user['matricola']);
     }
@@ -818,31 +931,38 @@ function submit($exam, $user) {
         $matricola = array_get($_POST, 'matricola', $matricola);
     }
 
-    $exam->compose_for($matricola);
+    $text = new Text($exam, $matricola, false, false);
 
     if (!$is_admin) {
         if (!$exam->is_open) {
             $response['message'] = "il compito è chiuso, non è possibile inviare le risposte";
             return $response;
         }
-        if ($exam->seconds_to_finish !== null && $exam->seconds_to_finish <= 0) {
+        if ($text->seconds_to_finish !== null && $text->seconds_to_finish <= 0) {
             $response['message'] = "tempo scaduto, non è più possibile inviare le risposte.";
             return $response;
         }
     }
     
-    foreach($exam->answers as &$answer) {
-        $key = 'answer_' . $answer['form_id'];
-        $val = array_get($_POST, $key);
-        if ($val === null) {
-            $response['message'] = 'richiesta non valida';
-            return $response;
+    $answers = [];
+
+    foreach($text->exercises as $exercise) {
+        foreach ($exercise['questions'] as $question) {
+            $form_id = $question['form_id'];
+            $answer = array_get($_POST, $form_id);
+            if ($answer === null) {
+                $response['message'] = 'richiesta non valida';
+                return $response;
+            }        
+            array_push($answers, [
+                'id' => $question['id'],
+                'form_id' => $form_id,
+                'answer' => $answer,
+                ]);
+            }
         }
-        $answer['answer'] = $val;
-    }
-    // error_log("risposte: " . json_encode($compito->risposte));
     
-    $response['timestamp'] = $exam->write($user, "submit", $exam->answers);
+    $response['timestamp'] = $exam->write($matricola, $user, "submit", $answers);
     $response['ok'] = True;
     $response['message'] = "risposte inviate!";
     return $response;
@@ -897,25 +1017,27 @@ function respond($action, $exam, $user) {
         $matricola = $user['matricola'];
         if ($user['is_admin']) {
             $matricola = array_get($_POST, 'matricola', '');
-            if (array_get($_POST, 'solutions') === 'true') $exam->show_solutions = True;
-            if (array_get($_POST, 'variants') === 'true') $exam->show_variants = True;
-            $exam->compose_for($matricola);  
+            $show_solutions = array_get($_POST, 'solutions') === 'true';
+            $show_variants = array_get($_POST, 'variants') === 'true';
+            $text = new Text($exam, $matricola, $show_variants, $show_solutions);  
         } else {
             // non admins cannot inspect variations
-            $exam->compose_for($matricola);
+            $text = new Text($exam, $matricola, false, false);
         }
-        return get_compito($exam, $user);
+        return get_compito($text, $user);
     } else if ($action === 'start') {
         $matricola = $user['matricola'];
-        $exam->compose_for($matricola);
+        $text = new Text($exam, $matricola, false, false);
         if (!$exam->is_open) throw new ResponseError("l'esame non è aperto");
-        if ($exam->check_students && $exam->student === null) throw new ResponseError("lo studente non è iscritto");
+        if ($exam->check_students && $text->student === null) throw new ResponseError("lo studente non è iscritto");
         if ($exam->start_timestamp && !$exam->can_be_repeated) {
             // l'esame era già stato avviato!
             throw new ResponseError("l'esame è già stato avviato");
         }
-        $exam->start($user);
-        return get_compito($exam, $user);
+        $exam->write($matricola, $user, 'start', True); /* segnamo l'inizio del compito */
+        // to recompute timers
+        $text = new Text($exam, $matricola, false, false);
+        return get_compito($text, $user);
     } else if ($action === 'submit') {
         return submit($exam, $user);
     } else if ($action === 'pdf_upload') {
@@ -933,13 +1055,12 @@ function respond($action, $exam, $user) {
         error_log("PDF_UPLOAD: " . json_encode($file));
         $now = new DateTime('NOW');
         $matricola = $user["matricola"];
-        $exam->compose_for($matricola);
         $filename = $exam->storage_path . "/" . $matricola . "_" . $now->format('c') . ".pdf";
         $r = move_uploaded_file($file["tmp_name"], $filename);
         if ($r) {
             $hash = md5_file($filename);
             my_log("upload " . $filename. " md5 hash " . $hash);
-            $dir = $exam->get_files_list();
+            $dir = $exam->get_files_list($matricola);
             return [
                 'ok' => True,
                 'dir' => $dir
@@ -956,18 +1077,18 @@ function respond($action, $exam, $user) {
             throw new ResponseError("non è più possibile rimuovere files");
         }
         $matricola = $user['matricola'];
-        $exam->compose_for($matricola);
         $filename = array_get($_POST, 'filename');
-        my_log("REMOVE FILE " . $filename);
-        if ($exam->pdf_filename_is_valid($filename)) {
+        if ($exam->pdf_filename_is_valid($filename, $matricola)) {
+            my_log("REMOVE FILE " . $filename);
             $filename = $exam->storage_path . "/" . $filename;
             unlink($filename);
-            $dir = $exam->get_files_list();
+            $dir = $exam->get_files_list($matricola);
             return [
                 'ok' => True,
                 'dir' => $dir
             ];
         } else {
+            my_log("REMOVE FILE INVALID FILENAME " . $filename);
             return [
                 'ok' => False,
                 'error' => 'nome file non valido'
@@ -978,9 +1099,8 @@ function respond($action, $exam, $user) {
         if ($user['is_admin']) {
             $matricola = array_get($_POST, 'matricola', $matricola);
         }
-        $exam->compose_for($matricola);
         $filename = array_get($_POST, 'filename');
-        if ($exam->pdf_filename_is_valid($filename)) {
+        if ($exam->pdf_filename_is_valid($filename, $matricola)) {
             $filename = $exam->storage_path . "/" . $filename;
             header("Content-type: application/pdf");
             // Send the file to the browser.
@@ -995,7 +1115,7 @@ function respond($action, $exam, $user) {
     } else if ($action === 'csv_download') {
         if (!$user['is_admin']) throw new ResponseError("user not authorized");
         header('Content-Type: text/csv');
-        header('Content-Disposition: attachment; filename="'.$exam.exam_id.'.csv";');
+        header('Content-Disposition: attachment; filename="'.$exam->exam_id.'.csv";');
         $fp = fopen('php://output', 'w');
         $exam->csv_response($fp);
         fclose($fp);

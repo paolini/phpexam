@@ -107,7 +107,7 @@ function submit(data) {
     data.text.exercises.forEach(function(exercise) {
         exercise.questions.forEach(function(question) {
             var val = $("#question_" + question.form_id).val();
-            post['answer_' + question.form_id] = val;
+            post[question.form_id] = val;
             new_answers[question.form_id] = val;
         })
     });
@@ -314,10 +314,7 @@ function main_compose_text(data) {
     data.text.exercises.forEach(function(exercise, i) {
         $exercises.append("<b>Esercizio " + (exercise.number) + ":</b> " + exercise.statement + "<br />");
         exercise.questions.forEach(function(question) {
-            var answer = "";
-            if (data.answers.hasOwnProperty(question.form_id)) {
-                answer = data.answers[question.form_id];
-            }
+            var answer = question.answer || "";
             var $input = $("<input>")
                 .attr("id", 'question_' + question.form_id)
                 .attr("class", 'exam')
@@ -339,8 +336,7 @@ function main_compose_text(data) {
             }
             $input.keyup(function() {
                 var val = $(this).val();
-                var submitted = data.answers[question.form_id];
-                if (submitted === undefined) submitted = '';
+                var submitted = question.answer || "";
                 $check.css('color', val != submitted ?'red':(val=='' ? 'black' : 'green'));
                 // if (changed) $("#response").empty();            
             }).keyup();
