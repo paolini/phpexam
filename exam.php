@@ -272,46 +272,6 @@ class Text {
             $this->student = array_get($exam->students, $matricola);
         }
 
-        // determina l'istante di inizio effettivo del compito 
-        // per questo studente
-        $submissions = $exam->read_submissions($matricola);
-        if (count($submissions) == 0) {
-            $this->start_timestamp = null;
-        } else {
-            $this->start_timestamp = $submissions[0]['timestamp'];
-            if ($exam->timestamp !== null && $exam->timestamp > $this->start_timestamp) {
-                /*
-                * se l'ultimo start e' anteriore alla data di inizio il compito e' stato riproposto
-                * e possiamo iniziare nuovamente
-                */
-                $this->start_timestamp = null;
-            }
-        }
-
-        // compute countdowns
-        $this->seconds_to_finish = null;
-        if ($this->start_timestamp !== null) {
-            // calcola il tempo che manca alla fine del compito
-            // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
-
-            if ($this->exam->duration_minutes !== null) {
-                $this->seconds_to_finish = $this->start_timestamp + $this->exam->duration_minutes * 60 - $this->exam->now;
-            }
-
-            // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
-            // non deve superare il tempo massimo
-            if ($this->exam->end_timestamp !== null) {
-                $s = $this->exam->end_timestamp - $this->exam->now;
-                if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
-                    $this->seconds_to_finish = $s;
-                }
-            }
-
-            if ($this->seconds_to_finish !== null && $this->seconds_to_finish <=0) {
-                $this->seconds_to_finish = 0;
-            }
-        }
-
         $this->instructions = null;
         $this->instructions_html = null;
         $instructions = $exam->tree['instructions'];
@@ -340,8 +300,25 @@ class Text {
                 array_push($this->exercises, $exercise);
             }
         }
-        // error_log("exercises: ".json_encode($this->exercises));
 
+
+        // determina l'istante di inizio effettivo del compito 
+        // per questo studente
+        $submissions = $exam->read_submissions($matricola);
+        if (count($submissions) == 0) {
+            $this->start_timestamp = null;
+        } else {
+            $this->start_timestamp = $submissions[0]['timestamp'];
+            if ($exam->timestamp !== null && $exam->timestamp > $this->start_timestamp) {
+                /*
+                * se l'ultimo start e' anteriore alla data di inizio il compito e' stato riproposto
+                * e possiamo iniziare nuovamente
+                */
+                $this->start_timestamp = null;
+            }
+        }
+
+        // inserisce tabella delle modifiche alle risposte
         $this->submissions = [];
         $last_submit = null;
         $last_user = null;
@@ -379,6 +356,31 @@ class Text {
                         }
                     }
                 }
+            }
+        }
+
+
+        // compute countdowns
+        $this->seconds_to_finish = null;
+        if ($this->start_timestamp !== null) {
+            // calcola il tempo che manca alla fine del compito
+            // se specificato un tempo massimo calcola in base all'inizio dello svolgimento
+
+            if ($this->exam->duration_minutes !== null) {
+                $this->seconds_to_finish = $this->start_timestamp + $this->exam->duration_minutes * 60 - $this->exam->now;
+            }
+
+            // se c'e' un tempo massimo di consegna calcola il tempo rimanente 
+            // non deve superare il tempo massimo
+            if ($this->exam->end_timestamp !== null) {
+                $s = $this->exam->end_timestamp - $this->exam->now;
+                if ($this->seconds_to_finish === null || $this->seconds_to_finish > $s) {
+                    $this->seconds_to_finish = $s;
+                }
+            }
+
+            if ($this->seconds_to_finish !== null && $this->seconds_to_finish <=0) {
+                $this->seconds_to_finish = 0;
             }
         }
 
@@ -454,8 +456,8 @@ class Text {
         $response = [];
         $response['user'] = $user;
         $response['matricola'] = $text->matricola;
-        $response['cognome'] = array_get($user, 'cognome');
-        $response['nome'] = array_get($user, 'nome');
+        $response['cognome'] = $text->cognome; // array_get($user, 'cognome');
+        $response['nome'] = $text->nome; // array_get($user, 'nome');
         $response['timestamp'] = $exam->timestamp;
         $response['end_timestamp'] = $exam->end_timestamp;
         $response['end_time'] = $exam->end_time;
