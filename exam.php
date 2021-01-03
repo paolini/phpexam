@@ -301,7 +301,6 @@ class Text {
             }
         }
 
-
         // determina l'istante di inizio effettivo del compito 
         // per questo studente
         $submissions = $exam->read_submissions($matricola);
@@ -453,23 +452,35 @@ class Text {
     function response_for($user) {
         $text = $this;
         $exam = $text->exam;
-        $response = [];
-        $response['user'] = $user;
-        $response['matricola'] = $text->matricola;
-        $response['cognome'] = $text->cognome; // array_get($user, 'cognome');
-        $response['nome'] = $text->nome; // array_get($user, 'nome');
-        $response['timestamp'] = $exam->timestamp;
-        $response['end_timestamp'] = $exam->end_timestamp;
-        $response['end_time'] = $exam->end_time;
-        $response['duration_minutes'] = $exam->duration_minutes;
-        $response['seconds_to_start'] = $exam->seconds_to_start;
-        $response['seconds_to_start_timeline'] = $exam->seconds_to_start_timeline;
-        $response['is_open'] = $exam->is_open;
-        $response['upload_is_open'] = $exam->upload_is_open;
-        $response['can_be_repeated'] = $exam->can_be_repeated;
-        $response['ok'] = True;
-        $response['instructions_html'] = $text->instructions_html;  
-        $response['file_list'] = $exam->get_files_list($text->matricola);
+
+        $cognome = "";
+        $nome = "";
+        if (count($text->submissions)) {
+            $cognome = $text->cognome;
+            $nome = $text->nome;
+        } else if (array_get($user, 'matricola') == $text->matricola) {
+            $cognome = array_get($user , 'cognome');
+            $nome = array_get($user, 'nome');
+        }
+
+        $response = [
+            'user' => $user,
+            'matricola' => $text->matricola,
+            'cognome' => $cognome,
+            'nome' => $nome,
+            'timestamp' => $exam->timestamp,
+            'end_timestamp' => $exam->end_timestamp,
+            'end_time' => $exam->end_time,
+            'duration_minutes' => $exam->duration_minutes,
+            'seconds_to_start' => $exam->seconds_to_start,
+            'seconds_to_start_timeline' => $exam->seconds_to_start_timeline,
+            'is_open' => $exam->is_open,
+            'upload_is_open' => $exam->upload_is_open,
+            'can_be_repeated' => $exam->can_be_repeated,
+            'ok' => True,
+            'instructions_html' => $text->instructions_html,  
+            'file_list' => $exam->get_files_list($text->matricola),
+        ];
     
         if (!array_get($user, 'is_admin')) { // verifica che lo studente sia iscritto
             if ($exam->check_students && $text->student===null) {

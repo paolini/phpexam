@@ -21,7 +21,7 @@
                 \[
                   \sum_{k=1}^{100} k
                 \]
-                <question id="gauss">
+                <question id="gauss.1">
                     La somma è:
                     <answer>
                     5050
@@ -33,7 +33,7 @@
                 \[
                   \sum_{k=1}^{50} 2k
                 \]
-                <question id="gauss">
+                <question id="gauss.2">
                     La somma è:
                     <answer>
                     2550
@@ -47,13 +47,13 @@
                 \[
                   x^2-2x+1 = 0
                 \]
-                <question id="n_soluzioni">
+                <question id="n_soluzioni.1">
                 Quante sono le soluzioni distinte?
                     <answer>
                         1
                     </answer>
                 </question>
-                <question id="soluzioni">
+                <question id="soluzioni.1">
                 Scrivere le soluzioni:
                     <answer>
                     \( x_{1,2}=1 \)
@@ -65,13 +65,13 @@
                 \[
                   x^2-1 = 0
                 \]
-                <question id="n_soluzioni">
+                <question id="n_soluzioni.2">
                 Quante sono le soluzioni distinte?
                     <answer>
                         2
                     </answer>
                 </question>
-                <question id="soluzioni">
+                <question id="soluzioni.2">
                 Scrivere le soluzioni:
                     <answer>
                     \( x_1=1, x_2=-1 \)
