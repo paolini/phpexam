@@ -53,7 +53,6 @@ function load(action) {
         post.password = $("#password").val();
     }
     post.action = action;
-    post.solutions = $("#show_solutions").prop('checked');
     var matricola = $("#set_matricola").val();
     if (matricola != '') {
         post.variants = false;
@@ -337,8 +336,8 @@ function main_compose_text(data) {
                 );
             if (question.solution) {
                 $exercises
-                    .append($("<span></span>").css('color','red').html(question.solution))
-                    .append($("<br />"));
+                    .append($("<span class='solution'></span>").css('color','red').html(question.solution))
+                    .append($("<br class='solution'/>"));
             }
             $input.keyup(function() {
                 var val = $(this).val();
@@ -686,7 +685,7 @@ $(function(){
         load('reload')
     });
     $("#show_solutions").change(function(){
-        load('reload')
+        $(".solution").toggle($("#show_solutions").is(":checked"));
     });
     $("#show_variants").change(function(){
         load('reload')

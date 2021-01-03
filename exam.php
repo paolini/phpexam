@@ -264,7 +264,7 @@ function interpolate_mustache($template, $student) {
 }
 
 class Text {
-    function __construct($exam, $matricola, $show_variants, $show_solutions) {
+    function __construct($exam, $matricola, $show_variants) {
         $this->exam = $exam;
         $this->matricola = $matricola;
         $this->student = null;
@@ -329,7 +329,6 @@ class Text {
         // error_log("ISTRUZIONI " . $this->instructions_html);        
 
         $this->show_variants = $show_variants;
-        $this->show_solutions = $show_solutions;
         $this->rand = new MyRand($this->exam->secret . '_' . $this->matricola);
         $tree = $this->exam->tree;
         assert($tree['type'] === 'exam');
@@ -434,7 +433,7 @@ class Text {
                         'id' => $question['id'],
                         'form_id' => $form_id,
                         'statement' => $question['statement'],
-                        'solution' => ($this->show_solutions ? $question['solution'] : null),
+                        'solution' => $question['solution'],
                         'answer' => null,
                     ]
                 );
@@ -483,17 +482,36 @@ class Text {
             // oppure siamo admin
             // oppure è stato dichiarato un testo pubblico
             // in tal caso possiamo mostrare il compito
-            if ($exam->is_open && !array_get($user, 'is_admin')) {
-                // logga gli accessi durante il compito
-                $exam->write($text->matricola, $user, "compito", [
-                    'exercises' => $text->exercises
+            my_log("SHOWING text ". $exam->exam_id . " for " . $text->matricola . " to " . $user['matricola']);
+            $show_solutions = array_get($user, 'is_admin', false) || ($exam->publish_text && $exam->publish_solutions);
+            $exercises = [];
+            foreach($text->exercises as $exercise) {
+                $questions = [];
+                foreach($exercise['questions'] as $question) {
+                    array_push($questions, [
+                        'id' => $question['id'],
+                        'form_id' => $question['form_id'],
+                        'statement' => $question['statement'],
+                        'solution' => ($show_solutions ? $question['solution'] : null),
+                        'answer' => $question['answer'],
                     ]);
                 }
-            $response['text'] = ['exercises' => $text->exercises];
+                array_push($exercises, [
+                    'number' => $exercise['number'],
+                    'statement' => $exercise['statement'],
+                    'questions' => $questions,
+                ]);
+            }
+            $response['text'] = ['exercises' => $exercises];
             $response['seconds_to_finish'] = $text->seconds_to_finish;
             $response['submissions'] = $text->submissions;
     
-            my_log("SHOWING text ". $exam->exam_id . " for " . $text->matricola . " to " . $user['matricola']);
+            if ($exam->is_open && !array_get($user, 'is_admin')) {
+                // logga gli accessi durante il compito
+                $exam->write($text->matricola, $user, "compito", [
+                    'exercises' => $response['text']['exercises']
+                    ]);
+                }
         } else {
             my_log("PREPARING exam ". $exam->exam_id . " for " . $user['matricola']);
         }
@@ -647,7 +665,7 @@ class Exam {
         $this->end_upload_time = my_xml_get($root, 'end_upload_time');
         $this->duration_minutes = (int) my_xml_get($root, 'duration_minutes');
         $this->can_be_repeated = my_xml_get_bool($root, "can_be_repeated", False);
-        $this->show_solutions = my_xml_get_bool($root, 'publish_solutions', False);
+        $this->publish_solutions = my_xml_get_bool($root, 'publish_solutions', False);
         $this->publish_text = my_xml_get_bool($root, "publish_text", False);
         $this->show_instructions = my_xml_get_bool($root, "show_instructions", True);
         $this->show_legenda = my_xml_get_bool($root, "show_legenda", True);
@@ -811,7 +829,7 @@ class Exam {
         $headers = ["timestamp", "minuti", "matricola", "cognome", "nome"];
         fputcsv($fp_handle, $headers);
         foreach ($students as $student) {
-            $text = new Text($this, $student['matricola'], true, true);
+            $text = new Text($this, $student['matricola'], true);
             $submissions = $text->submissions;
             if (!$with_log) $submissions = array_slice($submissions, -1);
             foreach($submissions as $submission) {
@@ -824,6 +842,7 @@ class Exam {
                 ];
                 $answers = array_get($submission, 'answers');
                 if ($answers != null) {
+                    usort($answers, function($a, $b) {return strcmp($a['id'], $b['id']);});            
                     foreach ($answers as $answer) {
                         array_push($row, $answer['exercise_id'], $answer['id'], $answer['answer']);
                     }
@@ -900,7 +919,7 @@ function submit($exam, $user) {
 
     if ($is_admin) $matricola = array_get($_POST, 'matricola', $matricola);
 
-    $text = new Text($exam, $matricola, false, false);
+    $text = new Text($exam, $matricola, false);
 
     if (!$is_admin) {
         if (!$exam->is_open) return ['ok' => false, 'message' => "il compito è chiuso, non è possibile inviare le risposte"];
@@ -927,7 +946,7 @@ function submit($exam, $user) {
     $timestamp = $exam->write($matricola, $user, 'submit', $answers);
 
     // ricomponi il testo con le nuove risposte
-    $text = new Text($exam, $matricola, false, false);
+    $text = new Text($exam, $matricola, false);
     $response = $text->response_for($user);
     $response['timestamp'] = $timestamp;
     $response['message'] = "risposte inviate!";
@@ -983,17 +1002,16 @@ function respond($action, $exam, $user) {
         $matricola = $user['matricola'];
         if ($user['is_admin']) {
             $matricola = array_get($_POST, 'matricola', '');
-            $show_solutions = array_get($_POST, 'solutions') === 'true';
             $show_variants = array_get($_POST, 'variants') === 'true';
-            $text = new Text($exam, $matricola, $show_variants, $show_solutions);  
+            $text = new Text($exam, $matricola, $show_variants);  
         } else {
             // non admins cannot inspect variations
-            $text = new Text($exam, $matricola, false, false);
+            $text = new Text($exam, $matricola, false);
         }
         return $text->response_for($user);
     } else if ($action === 'start') {
         $matricola = $user['matricola'];
-        $text = new Text($exam, $matricola, false, false);
+        $text = new Text($exam, $matricola, false);
         if (!$exam->is_open) throw new ResponseError("l'esame non è aperto");
         if ($exam->check_students && $text->student === null) throw new ResponseError("lo studente non è iscritto");
         if ($exam->start_timestamp && !$exam->can_be_repeated) {
@@ -1002,7 +1020,7 @@ function respond($action, $exam, $user) {
         }
         $exam->write($matricola, $user, 'start', True); /* segnamo l'inizio del compito */
         // to recompute timers
-        $text = new Text($exam, $matricola, false, false);
+        $text = new Text($exam, $matricola, false);
         return $text->response_for($user);
     } else if ($action === 'submit') {
         return submit($exam, $user);
