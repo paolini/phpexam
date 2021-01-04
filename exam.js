@@ -599,7 +599,9 @@ function readAsDataURL(file) {
     formdata = new FormData();
     formdata.append('file', blob, blob.name);
     formdata.append('action', 'pdf_upload');
-    formdata.append('matricola', $("#set_matricola").val());
+    formdata.append('matricola', $("#set_matricola").val()); // ignored if not admin
+    $("#upload_input_id").hide();
+    $("#upload_message").empty().append($("<div></div>").addClass("loader"));
     $.ajax({
         url: "",
         type: "POST",
@@ -607,6 +609,7 @@ function readAsDataURL(file) {
         processData: false,
         contentType: false
     }).done(function(data){
+        $("#upload_message").empty();
         if (data.ok) {
             pages = [];
             $("#upload_div_id").empty();
