@@ -454,9 +454,19 @@ function main(data) {
         main_compose_no_text(data);
     }
 
-    populate_pdf_list(data.file_list, data.upload_is_open);
+    populate_pdf_list(data.file_list, data.upload_is_open || data.user.is_admin);
     
-    if (data.upload_is_open) {
+    $("#upload_message").empty();
+
+    if (!data.upload_is_open) {
+        if (data.user.is_admin) {
+            upload_write_error("Il caricamento dei files è disabilitato per gli studenti.");
+        } else {
+            upload_write_error("Non è più possibile caricare i files.");
+        }
+    }
+
+    if (data.upload_is_open || data.user.is_admin) {
         $(".upload").show();
     } else {
         $(".upload").hide();
@@ -547,6 +557,11 @@ function readAsDataURL(file) {
     return page;
   }
 
+  function upload_write_error(msg) {
+    $p = $("<p></p>").text(msg).css("color", "red");
+    $("#upload_message").append($p);
+  }
+
   function create_pdf() {
     $("#upload_pdf_id").hide();
     $("#upload_input_id").hide();
@@ -582,8 +597,9 @@ function readAsDataURL(file) {
 
   function post_pdf(blob) {
     formdata = new FormData();
-    formdata.append('file', blob, 'upload.pdf');
+    formdata.append('file', blob, blob.name);
     formdata.append('action', 'pdf_upload');
+    formdata.append('matricola', $("#set_matricola").val());
     $.ajax({
         url: "",
         type: "POST",
@@ -596,11 +612,9 @@ function readAsDataURL(file) {
             $("#upload_div_id").empty();
             populate_pdf_list(data.dir, true);
         } else {
-            $div = $("#upload_list");
-            $div.append("<p style='color:red'>Errore: " + data.error + ". File non caricato</p>");
+            upload_write_error("Errore: " + data.error + ". File non caricato");
         } 
         $("#upload_input_id").show();
-        console.log("response: " + data);
     });
   }
   
@@ -611,9 +625,18 @@ function readAsDataURL(file) {
         post_pdf(file);
       } else {
           // assume image
-        var page = await create_page(file);
-        div.append(page.div);
-        pages.push(page);
+        try {
+            var page = await create_page(file);
+            div.append(page.div);
+            pages.push(page);
+        } catch(e) {
+            if (e.name == 'EncodingError') {
+                var msg = "Formato non valido: l'immagine non può essere decodificata";
+            } else {
+                msg = e.message;
+            }
+            upload_write_error(msg);
+        }
       }
     }
     $('#upload_input_id').val('');
@@ -652,15 +675,15 @@ function readAsDataURL(file) {
                 if (confirm(this.data_filename+"\nVeramente vuoi eliminare il file?")) {
                     $.post("", {
                         action: 'pdf_delete',
+                        matricola: $("#set_matricola").val(), // ignorato se non admin
                         filename: this.data_filename
                     }).done(function(data) {
                         if (data.ok) {
                             pages = [];
                             $("#upload_div_id").empty();
-                            populate_pdf_list(data.dir, data.upload_is_open);            
+                            populate_pdf_list(data.dir, true);            
                         } else {
-                            $div = $("#upload_list");
-                            $div.append("<p>Errore: file non eliminato</p>");             
+                            upload_write_error("Errore: " + data.error);
                         }
                     });
                 }
@@ -696,6 +719,7 @@ $(function(){
     });
     $("#upload_input_id").change(function() {
         $("#upload_pdf_id").hide();
+        $("#upload_message").empty();
         upload(this, $("#upload_div_id")[0]);
     });
     $("#upload_pdf_id").click(create_pdf).hide();

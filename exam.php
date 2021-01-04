@@ -1038,7 +1038,7 @@ function respond($action, $exam, $user) {
     } else if ($action === 'submit') {
         return submit($exam, $user);
     } else if ($action === 'pdf_upload') {
-        if (! $exam->upload_is_open) {
+        if (! ($exam->upload_is_open || $user['is_admin'])) {
             throw new ResponseError("non è più possibile caricare files");
         }
         $file = $_FILES['file'];
@@ -1051,8 +1051,17 @@ function respond($action, $exam, $user) {
         } 
         error_log("PDF_UPLOAD: " . json_encode($file));
         $now = new DateTime('NOW');
-        $matricola = $user["matricola"];
-        $filename = $exam->storage_path . "/" . $matricola . "_" . $now->format('c') . ".pdf";
+        if ($user['is_admin']) {
+            // mantieni il nome del file dato dall'amministratore
+            $matricola = array_get($_POST, 'matricola');
+            $filename = $file['name'];
+            if (!$exam->pdf_filename_is_valid($filename, $matricola)) $filename = $matricola . '_' . $filename;
+        } else {
+            $matricola = $user["matricola"];
+            $filename = $matricola . "_" . $now->format('c') . ".pdf";    
+        }
+        if (!$exam->pdf_filename_is_valid($filename, $matricola)) throw new ResponseError("il nome utilizzato per il file non è valido");
+        $filename = $exam->storage_path . "/" . $filename;
         $r = move_uploaded_file($file["tmp_name"], $filename);
         if ($r) {
             $hash = md5_file($filename);
@@ -1064,16 +1073,16 @@ function respond($action, $exam, $user) {
                 ];
         } else {
             my_log("upload " . $filename . " failed");
-            return [
-                'ok' => False,
-                'error' => 'upload fallito'
-            ];
+            throw new ResponseError("upload fallito");
         }
     } else if ($action === 'pdf_delete') {
-        if (!$exam->upload_is_open) {
-            throw new ResponseError("non è più possibile rimuovere files");
+        $matricola = null;
+        if ($user['is_admin']) {
+            $matricola = array_get($_POST, 'matricola');
+        } else {
+            if (!$exam->upload_is_open) throw new ResponseError("non è più possibile rimuovere files");
+            $matricola = $user['matricola'];
         }
-        $matricola = $user['matricola'];
         $filename = array_get($_POST, 'filename');
         if ($exam->pdf_filename_is_valid($filename, $matricola)) {
             my_log("REMOVE FILE " . $filename);
@@ -1086,10 +1095,7 @@ function respond($action, $exam, $user) {
             ];
         } else {
             my_log("REMOVE FILE INVALID FILENAME " . $filename);
-            return [
-                'ok' => False,
-                'error' => 'nome file non valido'
-            ];
+            throw new ResponseError("nome file non valido");
         }
     } else if ($action === 'pdf_download') {
         $matricola = $user['matricola'];
@@ -1104,10 +1110,7 @@ function respond($action, $exam, $user) {
             readfile($filename);
             return null;
         } else {
-            return [
-                'ok' => False,
-                'error' => 'non autorizzato'
-            ];
+            throw new ResponseError("non autorizzato");
         }
     } else if ($action === 'csv_download') {
         $with_log = (array_get($_POST, 'with_log') == '1');
@@ -1170,10 +1173,6 @@ try {
     header('HTTP/1.1 500 Internal Error');
     echo("<html><body><pre>{$e->getMessage()}</pre></html></body>");
     exit();
-}
-
-function login($username, $password) {
-
 }
 
 $action = array_get($_POST, 'action');
@@ -1364,6 +1363,7 @@ table th:last-child {
             <p>Elenco files caricati: </p>
             <ul id="upload_list">
             </ul>
+            <div id="upload_message"></div>
             <div class="upload">
                 <input id="upload_input_id" type="file" multiple>
                 <button id="upload_pdf_id">carica file</button>
