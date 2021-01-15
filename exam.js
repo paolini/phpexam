@@ -135,11 +135,12 @@ function submit(data) {
         } else {
             $("#response").css("color", "red");
         }
-        Object.entries(data.answers).forEach(function(item){
-            var key = item[0];
-            var val = item[1];
-            data.answers[key] = val;
-            $("#question_" + key).keyup();
+        data.text.exercises.forEach(function(exercise) {
+            exercise.questions.forEach(function(question) {
+                $("#question_" + question.form_id)
+                    .val(question.answer)
+                    .keyup();
+            })
         });
     });
 }

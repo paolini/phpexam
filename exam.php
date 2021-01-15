@@ -293,9 +293,11 @@ class Text {
         $tree = $this->exam->tree;
         assert($tree['type'] === 'exam');
         $this->exercises = [];
+        $this->form_id = 0; // incremental number used for input id in html form
+        $context = new stdClass();
+        $context->exercise_count = 0;
         foreach($tree['children'] as $child) {
-            $this->form_id = 0; // incremental number used for input id in html form
-            $lst = $this->recurse_compose_exercises($child);
+            $lst = $this->recurse_compose_exercises($child, $context);
             foreach ($lst as $exercise) {
                 array_push($this->exercises, $exercise);
             }
@@ -385,11 +387,7 @@ class Text {
 
     }    
 
-    private function recurse_compose_exercises($tree, $context=null) {
-        if ($context === null) {
-            $context = new stdClass();
-            $context->exercise_count = 0;
-        }
+    private function recurse_compose_exercises($tree, $context) {
         $name = $tree['type'];
         if ($name === 'shuffle') {
             $lst = [];
@@ -777,7 +775,7 @@ class Exam {
             }
             $student = [];
             for($i=0;$i < count($headers); $i++) {
-                $student[$headers[$i]] = $line[$i];
+                $student[$headers[$i]] = $i < count($line)? $line[$i] : "";
             }
             $students[$line[$ident_column]] = $student;
         }
