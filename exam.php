@@ -1102,8 +1102,9 @@ function respond($action, $exam, $user) {
         }
         $filename = array_get($_POST, 'filename');
         if ($exam->pdf_filename_is_valid($filename, $matricola)) {
+            header("Content-type: application/pdf; name=\"" . $filename . "\"");
+            header("Content-Disposition: inline; filename=\"" . $filename . "\"");
             $filename = $exam->storage_path . "/" . $filename;
-            header("Content-type: application/pdf");
             // Send the file to the browser.
             readfile($filename);
             return null;
