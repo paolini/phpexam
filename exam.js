@@ -264,7 +264,11 @@ function main_compose_answer_log(data) {
             var answers = log.answers == null ? [] : log.answers;
             for (var k=0; k < answers.length; ++k) {
                 if (answers[k].id == keys[j]) {
-                    $td.text(answers[k].answer);
+                    var ans = answers[k].answer; 
+                    if (i>0 && ans!="" && submissions[i-1].answers != null && submissions[i-1].answers[k].answer == ans) {
+                        ans = "«";
+                    }
+                    $td.text(ans);
                     break;
                 }
             }
