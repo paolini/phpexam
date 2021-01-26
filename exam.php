@@ -1009,6 +1009,9 @@ function respond($action, $exam, $user) {
         session_destroy();   
         $user = null;
         return ['ok' => True];
+    } else if ($action === 'keepalive') {
+        // used to refresh session timeout
+        return ['ok' => True];
     } else if ($action === 'reload' || $action === 'load' || $action == 'login') {
         $matricola = $user['matricola'];
         if ($user['is_admin']) {

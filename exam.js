@@ -85,6 +85,7 @@ function load(action) {
                 error(data.error || "errore interno 243");
             }
         }
+        if (action == 'keepalive') return; // do nothing
         return main(data);
     });
 }
@@ -732,4 +733,7 @@ $(function(){
     }).change();
 
     load('load');
+    window.setInterval(function() {
+        load('keepalive');
+    }, 5*60*1000); // every 5 minutes
 })
