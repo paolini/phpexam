@@ -494,13 +494,11 @@ function readAsDataURL(file) {
     var rotation = page.rotation;
     var canvas = page.canvas;
   
-    var MAX_DIAG = 1000;
-    var scale = MAX_DIAG / Math.sqrt(img.width*img.width + img.height*img.height);
-    var width = img.width;
-    var height = img.height;
+    var MAX_RES = 800;
+    var scale = MAX_RES / Math.min(img.width, img.height);
     if (scale > 1.0) scale = 1.0;
-    width = width * scale;
-    height = height * scale;
+    var width = img.width * scale;
+    var height = img.height * scale;
     if (rotation == 90 || rotation == 270) {
       canvas.width = height;
       canvas.height = width;
