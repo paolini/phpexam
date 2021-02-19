@@ -1173,7 +1173,7 @@ try {
     $exam = new Exam($exam_filename, $exam_id);
 } catch (Exception $e) {
     header('HTTP/1.1 500 Internal Error');
-    echo("<html><body><pre>{$e->getMessage()}</pre></html></body>");
+    echo("<html><body><pre>" . htmlspecialchars($e->getMessage()) . "</pre></html></body>");
     exit();
 }
 
