@@ -78,9 +78,14 @@ function load(action) {
                 // invalid user: maybe the session is terminated
                 // try to authenticate again and then
                 // retry the same action
-                reauthenticate(function() {
-                    load(action);
-                });
+                if (action == 'login') {
+                    error(data.error);
+                } else {
+                    // avoid to reauthenticate if the login failed
+                    reauthenticate(function() {
+                        load(action);
+                    });
+                }
             } else {
                 error(data.error || "errore interno 243");
             }

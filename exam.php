@@ -76,7 +76,7 @@ function authenticate($username, $password) {
     
     // verify binding
     if (!$ldapbind) {
-        my_log("credenziali non valide");
+        my_log("credenziali non valide ".$username);
         ldap_close($ldapConnection);
         return null;
     }
@@ -98,6 +98,43 @@ function authenticate($username, $password) {
         // $user['common_name'] = $m['cn'][0];
         'matricola' => array_get($m, 'unipistudentematricola',[$ldapUser])[0]
     ];
+}
+
+function csv_authenticate($username, $password, $exam) {
+    if ($username == '') return null;
+    if ($password == '' || $password === null) return null;
+
+    if ($exam->students === null) {
+        my_log("no csv file provided for csv authentication");
+        return null;
+    }
+
+    foreach($exam->students as $student) {
+        $user = [
+            'matricola' => '',
+            'user' => '',
+            'cognome' => '',
+            'nome' => '',
+            'is_fake' => false
+        ];
+        $pass = null;
+        foreach($student as $field => $value) {
+            if (strtolower($field) === 'password') {
+                $pass = $value;
+            } else if (strtolower($field) == 'matricola') {
+                $user['matricola'] = $value;
+            } else if (strtolower($field) == 'cognome') {
+                $user['cognome'] = $value;
+            } else if (strtolower($field) == 'nome') {
+                $user['nome'] = $value;
+            }
+        }
+        if ($pass !== null && $pass === $password) {
+            $user['user'] = $user['matricola'];
+            return $user;
+        }
+    }
+    return null;
 }
 
 function fake_authenticate($username, $password) {
@@ -660,6 +697,7 @@ class Exam {
     
         $root = $this->xml_root;
         $this->now = time();
+        $this->redirect = my_xml_get($root, 'redirect', null);
         $this->secret = my_xml_get($root, 'secret', '');
         $this->admins = my_explode(',', my_xml_get($root, 'admins', ''));
         $this->course = my_xml_get($root, 'course');
@@ -767,7 +805,7 @@ class Exam {
                 for ($i=0; $i<count($headers); $i++) {
                     if (strtolower($headers[$i]) == 'matricola') {
                         $ident_column = $i;
-                    break;
+                        break;
                     }
                 }
                 if ($ident_column === null) throw new ParseError("Mi aspetto 'matricola' come intestazione di una colonna");
@@ -1177,6 +1215,12 @@ try {
     exit();
 }
 
+if ($exam->redirect !== null) {
+    my_log("REDIRECT: " . $exam_id . " -> " . $exam->redirect);
+    header("Location: " . $exam->redirect);
+    exit();
+}
+
 $action = array_get($_POST, 'action');
 
 //$_SESSION['user'] = null; // test session timeout
@@ -1191,6 +1235,7 @@ if ($action == 'login') {
         $u = null;
         if ($auth === 'ldap') $u = authenticate($username, $password);
         else if ($auth === 'fake') $u = fake_authenticate($username, $password);
+        else if ($auth === 'csv') $u = csv_authenticate($username, $password, $exam);
         else throw new Exception("invalid authentication method $auth");
         if ($u !== null) {
             $user = $u;
