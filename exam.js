@@ -743,4 +743,5 @@ $(function(){
     window.setInterval(function() {
         load('keepalive');
     }, 5*60*1000); // every 5 minutes
+    $("#qrcode").qrcode(window.location.href);
 })
