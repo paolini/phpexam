@@ -297,7 +297,7 @@ function main_compose_text_timer(data) {
                 if (s < 60) color = "red";
                 else if (s< 5*60) color = "orange";
                 else color = "blue";
-                $("#timer").html("<span style='color:" + color + "'>Tempo rimanente: " + seconds_to_human_string(s) + "</span>");
+                $("#timer").html("<span style='color:" + color + "'>Tempo rimanente: " + seconds_to_human_string(s) + " " + ("-/|\\"[s%4]) + "</span>");
                 if (s <= 0) {
                     $("#timer").html("<span style='color:" + color + "'>Tempo scaduto</span>");
                     $("#submit").hide();
