@@ -1249,11 +1249,9 @@ if ($action == 'login') {
 if ($user != null) {
     $user['is_admin'] = $exam->is_admin(array_get($user, 'matricola'));
 }
-
+// non lasciare righe vuote qui sotto!!!
 ?>
-
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
-
 <?php
 try {
     try {

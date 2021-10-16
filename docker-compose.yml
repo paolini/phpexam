@@ -1,0 +1,9 @@
+version: '3.8'
+services:
+  php-exam:
+    container_name: phpexam
+    image: paolini/phpexam
+    volumes:
+      - var:/app/var
+    ports:
+      - 8000:80
