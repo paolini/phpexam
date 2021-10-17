@@ -1194,11 +1194,14 @@ if ($exam_id === null) $exam_id = request_path();
 
 if (!preg_match('/^[A-Za-z0-9\-]+$/', $exam_id)) {
     header('HTTP/1.1 404 Not Found');
-    echo("indirizzo non valido");
+    echo("phpexam: indirizzo non valido");
     exit();
 }
 
-$exam_filename = __DIR__ . '/' . $exam_id . '.xml';
+$XML_PATH = getenv("PHPEXAM_XML_DIR");
+if (!$XML_PATH) $XML_PATH = __DIR__;
+
+$exam_filename = $XML_PATH . '/' . $exam_id . '.xml';
 if (!file_exists($exam_filename)) {
     error_log("Cannot open file $exam_filename\n");
     header('HTTP/1.1 404 Not Found');

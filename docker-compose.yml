@@ -1,9 +1,20 @@
-version: '3.8'
+version: '2.3'
 services:
   php-exam:
     container_name: phpexam
     image: paolini/phpexam
     volumes:
       - var:/app/var
+      - .:/app/xml
     ports:
       - 8000:80
+    environment:
+      - PHPEXAM_XML_DIR=/app/xml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.caps-develop.rule=Host(`exam.caps.dm.unipi.it`)"
+      - "traefik.http.routers.caps-develop.tls.certresolver=le"
+
+
+volumes:
+  var:
