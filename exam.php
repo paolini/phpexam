@@ -16,6 +16,7 @@ session_start();
 
 function my_log($msg) 
 {
+    global $VAR_PATH;
     $fp = fopen($VAR_PATH . '/phpexam.log', 'at');
     if ($fp !== null) {
         $timestamp = date(DATE_ATOM);
@@ -687,6 +688,7 @@ function xml_recurse_parse($xml, $context=null) {
 
 class Exam {
     function __construct($xml_filename, $exam_id) {
+        global $VAR_PATH, $ETC_PATH;
         $this->exam_id = $exam_id;
         libxml_use_internal_errors(true);
         $this->xml_root = simplexml_load_file($xml_filename);
