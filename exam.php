@@ -1,5 +1,10 @@
 <?php
 
+$ETC_PATH = getenv("PHPEXAM_ETC_PATH");
+if (!$ETC_PATH) $ETC_PATH = __DIR__ . '/etc';
+$VAR_PATH = getenv("PHPEXAM_VAR_PATH");
+if (!$VAR_PATH) $VAR_PATH = __DIR__ . '/var';
+
 date_default_timezone_set('Europe/Rome');
 
 // server should keep session data for AT LEAST 5 hour
@@ -11,7 +16,7 @@ session_start();
 
 function my_log($msg) 
 {
-    $fp = fopen(__DIR__ . '/var/phpexam.log', 'at');
+    $fp = fopen($VAR_PATH . '/phpexam.log', 'at');
     if ($fp !== null) {
         $timestamp = date(DATE_ATOM);
         fwrite($fp, "$timestamp $msg\n");
@@ -148,7 +153,6 @@ function fake_authenticate($username, $password) {
         'is_fake' => true
     ];
 }
-
 
 function my_int32($x) {
     # Get the 32 least significant bits.
@@ -727,7 +731,7 @@ class Exam {
         $this->storage_path = my_xml_get($root, 'storage_path', $this->exam_id);
         if (substr($this->storage_path, 0, 1) !== '/') {
             // relative path
-            $this->storage_path = __DIR__ . '/' . $this->storage_path;
+            $this->storage_path = $VAR_PATH . '/' . $this->storage_path;
         }
         if (!is_dir($this->storage_path)) {
             // todo: controllare se da' errore!
@@ -740,7 +744,7 @@ class Exam {
         $students_csv_filename = my_xml_get($root, 'students_csv');
         if ($students_csv_filename !== null) {
             if (substr($students_csv_filename, 0, 1) !== '/') {
-                $students_csv_filename = __DIR__ . '/' . $students_csv_filename;
+                $students_csv_filename = $ETC_PATH . '/' . $students_csv_filename;
             }
             $this->load_students_csv($students_csv_filename);
         }
@@ -1198,10 +1202,7 @@ if (!preg_match('/^[A-Za-z0-9\-]+$/', $exam_id)) {
     exit();
 }
 
-$XML_PATH = getenv("PHPEXAM_XML_DIR");
-if (!$XML_PATH) $XML_PATH = __DIR__;
-
-$exam_filename = $XML_PATH . '/' . $exam_id . '.xml';
+$exam_filename = $ETC_PATH . '/' . $exam_id . '.xml';
 if (!file_exists($exam_filename)) {
     error_log("Cannot open file $exam_filename\n");
     header('HTTP/1.1 404 Not Found');

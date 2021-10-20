@@ -6,7 +6,7 @@
     duration_minutes='1'
     secret='shhht!' 
     admins='admin'
-    storage_path='var/example'
+    storage_path='example'
     auth_methods='fake'
     can_be_repeated='true'
 >
