@@ -1,8 +1,4 @@
-20*.csv
-20*.xml
-test.xml
-istruzioni.md
-example-storage/*
+etc/*
 var/*
 vendor/*
 test/*
