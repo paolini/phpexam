@@ -10,6 +10,7 @@
 # docker push paolini/phpexam:latest
 #
 FROM php:7.4-apache
+RUN apt update && apt install libldap2-dev
 COPY webroot/docker_index.php /var/www/html/index.php
 COPY exam.js /var/www/html/exam.js
 RUN mkdir /app
@@ -17,5 +18,5 @@ RUN mkdir /app/var
 RUN chown www-data.www-data /app/var
 COPY exam.php /app
 COPY exam.js /app
-COPY example.xml /app
+COPY etc/example.xml /app
 WORKDIR /app
