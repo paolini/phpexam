@@ -21,6 +21,8 @@ RUN mkdir /app/var
 RUN mkdir /app/etc
 RUN chown www-data.www-data /app/var
 COPY exam.php /app
+COPY composer.json /app
 COPY exam.js /app
 COPY etc/example.xml /app/etc
 WORKDIR /app
+RUN composer install

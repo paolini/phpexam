@@ -15,6 +15,12 @@ inoltre potranno vedere tutte le varianti e le soluzioni.
 Il file di descrizione di un esame è un file XML. Il sistema è integrato con MathJax e dunque 
 è possibile scrivere formule matematiche nei testi dei problemi.
 
+# installazione
+
+Eseguire il seguente comando se si vuole utilizzare mustache. Dovrebbe creare la directory `vendor':
+
+    composer install
+
 # sviluppo in locale
 
 Si può avviare un server in locale
@@ -111,7 +117,7 @@ va usata solo per lo sviluppo in quanto accetta qualunque username e password.
 
 * *show_legenda:* mostra la legenda. Default: true
 
-* *students_csv:* nome di un file csv contenente una riga di intestazione e poi una riga per ogni studente. Ci deve essere una colonna con intestazione "matricola". Nelle \<instructions> sarà allora possibile fare riferimento ai campi relativi allo studente. Se ad esempio si inserisce una colonna "nome" si potrà ottenere il valore di quel campo con la sintassi {{ student['nome'] }}
+* *students_csv:* nome di un file csv contenente una riga di intestazione e poi una riga per ogni studente. Ci deve essere una colonna con intestazione "matricola". Nelle \<instructions> se `mustache` è abilitato sarà allora possibile fare riferimento ai campi relativi allo studente. Se ad esempio si inserisce una colonna "nome" si potrà ottenere il valore di quel campo con la sintassi {{# student }}{{ nome }}{{/ student }}
 
 * *csv_delimiter:* carattere utilizzato per la separazione dei campi 
 nel file csv.
